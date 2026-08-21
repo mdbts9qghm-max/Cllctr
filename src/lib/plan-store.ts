@@ -8,7 +8,7 @@
 
 import { db } from './db';
 import { addDays, today } from './dates';
-import { now } from './ids';
+import { newId, now } from './ids';
 import { generateTrainingPlan, type GeneratedPlan, type PlanInput } from './planner';
 import {
   applyRescheduleToSessions,
@@ -17,7 +17,7 @@ import {
   type RescheduleContext,
 } from './replan';
 import type { ShiftContext } from './shifts';
-import type { Session, Settings } from './types';
+import type { Session, SessionFeeling, SessionLog, Settings } from './types';
 
 /** Erzeugt einen Plan und schreibt ihn. Ein bestehender aktiver Plan wird ersetzt. */
 export async function createAndSavePlan(input: PlanInput): Promise<GeneratedPlan> {
@@ -77,6 +77,53 @@ export async function clearActivePlan(): Promise<void> {
 /** Markiert eine Einheit als erledigt. */
 export async function markSessionDone(sessionId: string): Promise<void> {
   await db.sessions.update(sessionId, { status: 'done', updatedAt: now() });
+}
+
+export interface QuickLog {
+  rpe: number | null;
+  durationMin: number | null;
+  distanceKm: number | null;
+  feeling: SessionFeeling | null;
+  note: string;
+}
+
+/**
+ * Hakt eine Einheit ab und schreibt zugleich das Protokoll.
+ *
+ * Beides zusammen, weil ein "erledigt" ohne RPE die Information verliert, aus
+ * der später die Deload-Erkennung und die Statistiken entstehen. Pro Session
+ * gibt es höchstens einen Eintrag — erneutes Abhaken aktualisiert ihn.
+ */
+export async function logSession(session: Session, entry: QuickLog): Promise<void> {
+  const ts = now();
+
+  await db.transaction('rw', [db.sessions, db.sessionLogs], async () => {
+    const existing = (await db.sessionLogs.where('sessionId').equals(session.id).toArray())[0];
+
+    const record: SessionLog = {
+      id: existing?.id ?? newId('log'),
+      sessionId: session.id,
+      date: session.date,
+      completed: true,
+      rpe: entry.rpe,
+      durationMin: entry.durationMin ?? session.plannedDurationMin,
+      distanceKm: entry.distanceKm,
+      avgHr: existing?.avgHr ?? null,
+      maxHr: existing?.maxHr ?? null,
+      feeling: entry.feeling,
+      note: entry.note,
+      createdAt: existing?.createdAt ?? ts,
+      updatedAt: ts,
+    };
+
+    await db.sessionLogs.put(record);
+    await db.sessions.update(session.id, { status: 'done', updatedAt: ts });
+  });
+}
+
+/** Das Protokoll zu einer Einheit, falls es eines gibt. */
+export async function getSessionLog(sessionId: string): Promise<SessionLog | undefined> {
+  return (await db.sessionLogs.where('sessionId').equals(sessionId).toArray())[0];
 }
 
 /** Setzt eine Einheit zurück auf geplant. */

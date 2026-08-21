@@ -155,7 +155,7 @@ deshalb bereits in Phase 1 gebaut, nicht am Ende.
 |---|---|---|
 | 1 | Setup, Datenmodell, IndexedDB, Schichtauflösung, Export/Import | **fertig** |
 | 2 | Trainingsplanung: Generator + adaptives Umplanen | **fertig** |
-| 3 | Heute-Screen | offen |
+| 3 | Heute-Screen | **fertig** |
 | 4 | Tasks | offen |
 | 5 | Statistiken (`recharts`) | offen |
 | 6 | Soul Collector Layer | offen |
@@ -288,6 +288,58 @@ Automatisierte Durchläufe (nicht im Repo, in der Sitzung ausgeführt):
    abhaken, verpassen.
 3. Vereinzelt findet eine Einheit in einem Zyklus keinen Tag. Der Plan-Screen meldet das,
    still verschluckt wird es nicht.
+
+---
+
+## Phase 3 — Heute-Screen
+
+Der Startbildschirm und die Antwort auf „nimm mir das Nachdenken ab". Aufbau in der
+Reihenfolge, in der die Fragen morgens auftauchen:
+
+1. **Heute** — Schicht, Kapazität, die Einheit(en) mit vollem Inhalt
+2. **Warum heute** — die Begründung, siehe unten
+3. **Heute sinnvoll** — Aufgaben, Platzhalter bis Phase 4
+4. **Stand im Block** — Zyklus X von Y, erledigt/geplant, Deload-Countdown
+5. **Als Nächstes** — die kommenden vier Tage in einer Zeile pro Tag
+6. **Seelen in Reichweite** — Platzhalter bis Phase 6
+
+### Die Begründung ist das eigentliche Feature (`explain.ts`)
+
+Eine App, die nur sagt *was* ansteht, muss man glauben. Eine, die sagt *warum*, kann man
+nachvollziehen. `explainSession` leitet den Satz aus dem ab, was der Generator ohnehin
+entschieden hat — Schichtkapazität, Position im Zyklus, Nachbartage:
+
+> „Intervalle braucht einen ganzen Tag. Heute ist Freischicht — der nächste Tag, der das
+> hergibt, wäre erst Di, 25. Aug."
+>
+> *Doppeltag: dazu kommt Kraft Unterkörper. Laufen zuerst, Kraft danach — mit frischen
+> Beinen läuft es sich besser.*
+> *Morgen ist Tagschicht — die gute Gelegenheit ist heute.*
+
+Rangfolge: Eine Umplanung erklärt sich selbst und schlägt alles andere. Sonst zählt der
+Engpass — je knapper der Tag, desto mehr sagt er darüber aus, warum genau hier trainiert
+wird. Zusatzhinweise entstehen aus Deload, Nachtschicht, Doppeltag, dem Vortag und dem
+Folgetag.
+
+Ruhetage bekommen ebenfalls eine Begründung. Sind die Einheiten des Tages verpasst oder
+gestrichen, sagt die App das auch so — statt zu behaupten, der Zyklus sei planmäßig voll.
+Dazu der Satz, der den Ton der App trägt: *„Ein ausgefallener Tag bricht nichts."*
+
+### Protokoll beim Abhaken
+
+„Erledigt" öffnet direkt ein kurzes Protokoll: RPE über eine 1–10-Skala, Dauer, Distanz,
+Gefühl, Notiz. Bewusst zusammen — ein „erledigt" ohne RPE verliert die Information, aus der
+in Phase 5 die Statistiken und die Deload-Erkennung entstehen. Pro Einheit gibt es höchstens
+einen Eintrag, erneutes Abhaken aktualisiert ihn.
+
+Verpasste Einheiten lösen den Umplanungs-Vorschlag direkt auf dem Heute-Screen aus — ohne
+Umweg über den Plan.
+
+### Geprüft
+
+Ende-zu-Ende gegen den statischen Export: Plan erzeugen, Begründung prüfen, abhaken,
+Protokoll speichern und in IndexedDB nachweisen, verpassen, Vorschlag übernehmen,
+Ruhetag-Ansicht. Keine Konsolenfehler.
 
 ---
 
