@@ -162,7 +162,7 @@ deshalb bereits in Phase 1 gebaut, nicht am Ende.
 | 2 | Trainingsplanung: Generator + adaptives Umplanen | **fertig** |
 | 3 | Heute-Screen | **fertig** |
 | 4 | Tasks | **fertig** |
-| 5 | Statistiken (`recharts`) | offen |
+| 5 | Statistiken (`recharts`) | **fertig** |
 | 6 | Soul Collector Layer | offen |
 | 7 | PWA, Polish, Deployment | offen |
 
@@ -400,6 +400,85 @@ begrenzt, damit der 31. Januar nicht in den 3. März rutscht.
 - Vorschläge: Überfälliges zuerst, Termine getrennt, nicht fällige ausgeschlossen
 - Ende-zu-Ende: anlegen, abhaken, Folgeinstanz in IndexedDB nachgewiesen, neuer Termin
   erscheint nicht sofort wieder als Vorschlag
+
+---
+
+## Phase 5 — Auswertung und Bestwerte
+
+### Kein Diagramm ohne Aussage
+
+Drei Diagramme, jedes beantwortet genau eine Frage, die man sich als Athlet
+wirklich stellt:
+
+| Darstellung | Frage |
+|---|---|
+| **Wochenvolumen** (gestapelte Balken) | Halte ich das Volumen konstant, oder schwankt es mit der Schicht? |
+| **Intensitätsverteilung** (Balken je Zone) | Polarisiert — viel locker, wenig hart — oder versandet alles im Mitteltempo? |
+| **Anstrengung gegen Plan** (Linie + Bezugslinie) | Fühlt es sich härter an, als es sein sollte? |
+
+Darüber vier Kennzahlen-Kacheln (durchgezogen, Minuten diese Woche, Ø RPE,
+Abweichung zum Plan). Für einen einzelnen Wert ist eine Kachel ehrlicher als ein
+Balkendiagramm mit einem Balken.
+
+Ohne Protokolle zeigt der Screen einen Leerzustand statt leerer Achsen.
+
+### Farben sind gerechnet, nicht gewählt
+
+Alle Serienfarben wurden gegen die Diagrammfläche (`#131316`) geprüft:
+
+- **Disziplinen** — Blau `#3987e5` / Orange `#d95926`: Kontrast ≥ 3:1, Abstand
+  bei Farbfehlsichtigkeit ΔE 26.8 (Schwelle 8), Normalsicht ΔE 31.8.
+- **Zonen** — einhuige Rampe `#184f95` → `#b7d3f6`, monoton in der Helligkeit,
+  Stufenabstände ≥ 0.06, helles Ende 2.29:1 gegen die Fläche.
+- Der **Bernstein-Akzent der App fällt für Serienfarben durch das
+  Helligkeitsband** (L 0.758 statt 0.48–0.67) und bleibt deshalb der Oberfläche
+  vorbehalten — mit einer Ausnahme: als einzelne hervorgehobene Linie im
+  RPE-Verlauf, wo er gegen Grau steht und nicht gegen eine zweite Serie.
+
+Legende bei jeder Mehrserien-Darstellung, Tabellenansicht als Rückfallebene,
+Tooltips auf allen Diagrammen — Identität hängt nie allein an der Farbe.
+
+### Deload-Erkennung
+
+Drei unabhängige Signale, bewusst zurückhaltend gewichtet:
+
+1. Drei oder mehr Einheiten in Folge als schlecht bewertet.
+2. Die letzten Einheiten waren im Schnitt ≥ 1.5 RPE-Punkte härter als geplant.
+3. Das Wochenvolumen ist in drei Wochen um ≥ 40 % gestiegen.
+
+Ein Signal ist eine **Beobachtung**, zwei sind eine **Empfehlung**. Eine App, die
+bei jeder schlechten Einheit Alarm schlägt, wird ignoriert.
+
+### Bestwerte
+
+Beim Abhaken lassen sich Sätze bzw. Zeiten eintragen; die Übungsauswahl ist nach
+Disziplin gefiltert (bei Kraft die Kraftübungen, beim Laufen die Distanzen). Die
+Erkennung läuft automatisch:
+
+- **Gewicht** — bestes Einzelgewicht *und* geschätztes 1RM nach Epley, damit auch
+  mehr Wiederholungen bei weniger Gewicht als Fortschritt zählen (über 10 Wdh.
+  wird die Formel unzuverlässig, dort greift sie nicht).
+- **Wiederholungen / Distanz** — mehr ist besser.
+- **Zeit** — weniger ist besser. Die Richtung hängt an der Übung
+  (`higherIsBetter`), nicht an der Kennzahl.
+
+Neue Bestwerte werden direkt nach dem Speichern gemeldet.
+
+### Protokollieren geht überall
+
+Ursprünglich nur auf dem Heute-Screen — bei Schichtarbeit zu eng, weil man nach
+einer Nachtschicht selten am selben Tag dazu kommt. Das Formular ist deshalb eine
+eigene Komponente (`SessionLogForm`) und im Plan genauso verfügbar.
+
+### Geprüft
+
+- Wochenvolumen, Zonenverteilung, Kennzahlen, RPE-Verlauf gegen synthetische Daten
+- Deload-Erkennung: ruhiger Verlauf, drei schlechte Bewertungen, RPE über Plan,
+  beides gleichzeitig
+- Zukünftige Einheiten zählen nicht in die Completion-Rate
+- Ende-zu-Ende: Kniebeuge 120 kg × 5 → Bestwert 120 kg und 1RM 140 kg; 5 km in
+  22:45 → Bestzeit; Übungsauswahl disziplin-gefiltert
+- Achsen und Beschriftungen im gerenderten Screenshot auf Beschnitt geprüft
 
 ---
 

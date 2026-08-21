@@ -11,7 +11,6 @@ import {
   buildRescheduleProposal,
   clearActivePlan,
   createAndSavePlan,
-  markSessionDone,
   markSessionMissed,
   resetSessionStatus,
   toggleSessionLock,
@@ -19,6 +18,7 @@ import {
 import type { ReschedulePlan } from '@/lib/replan';
 import { SESSION_STATUS_LABEL, type Session } from '@/lib/types';
 import { Button, Card, Notice, Section } from '@/components/ui';
+import { NewRecordsNotice, SessionLogForm } from '@/components/SessionLogForm';
 
 const MESOCYCLE_COUNT = 3;
 
@@ -27,6 +27,8 @@ export default function PlanPage() {
   const settings = useSettings();
   const [busy, setBusy] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [loggingId, setLoggingId] = useState<string | null>(null);
+  const [newRecords, setNewRecords] = useState<string[]>([]);
   const [proposal, setProposal] = useState<ReschedulePlan | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -315,25 +317,46 @@ export default function PlanPage() {
                               </p>
                             ) : null}
 
-                            <div className="flex flex-wrap gap-2">
-                              {session.status === 'planned' ? (
-                                <>
-                                  <Button variant="primary" onClick={() => void markSessionDone(session.id)}>
-                                    Erledigt
+                            {loggingId === session.id ? (
+                              <SessionLogForm
+                                session={session}
+                                onSaved={(records) => {
+                                  setNewRecords(records);
+                                  setLoggingId(null);
+                                }}
+                                onCancel={() => setLoggingId(null)}
+                              />
+                            ) : (
+                              <>
+                                <NewRecordsNotice records={newRecords} />
+                                <div className="flex flex-wrap gap-2">
+                                  {session.status === 'planned' ? (
+                                    <>
+                                      <Button variant="primary" onClick={() => setLoggingId(session.id)}>
+                                        Erledigt
+                                      </Button>
+                                      <Button onClick={() => void handleMissed(session)}>Verpasst</Button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      {session.status === 'done' ? (
+                                        <Button onClick={() => setLoggingId(session.id)}>
+                                          Protokoll bearbeiten
+                                        </Button>
+                                      ) : null}
+                                      <Button onClick={() => void resetSessionStatus(session.id)}>
+                                        Zurück auf geplant
+                                      </Button>
+                                    </>
+                                  )}
+                                  <Button
+                                    onClick={() => void toggleSessionLock(session.id, !session.locked)}
+                                  >
+                                    {session.locked ? 'Fixierung lösen' : 'Fixieren'}
                                   </Button>
-                                  <Button onClick={() => void handleMissed(session)}>Verpasst</Button>
-                                </>
-                              ) : (
-                                <Button onClick={() => void resetSessionStatus(session.id)}>
-                                  Zurück auf geplant
-                                </Button>
-                              )}
-                              <Button
-                                onClick={() => void toggleSessionLock(session.id, !session.locked)}
-                              >
-                                {session.locked ? 'Fixierung lösen' : 'Fixieren'}
-                              </Button>
-                            </div>
+                                </div>
+                              </>
+                            )}
 
                             {session.locked ? (
                               <p className="mt-2 text-xs text-ember">

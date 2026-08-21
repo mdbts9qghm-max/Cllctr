@@ -2,15 +2,9 @@
 
 import { useState } from 'react';
 import type { SessionExplanation } from '@/lib/explain';
-import { logSession, type QuickLog } from '@/lib/plan-store';
-import type { Session, SessionFeeling } from '@/lib/types';
-import { Button, inputClass } from './ui';
-
-const FEELINGS: Array<{ key: SessionFeeling; label: string }> = [
-  { key: 'good', label: 'Gut' },
-  { key: 'ok', label: 'Ging so' },
-  { key: 'bad', label: 'Schlecht' },
-];
+import type { Session } from '@/lib/types';
+import { Button } from './ui';
+import { NewRecordsNotice, SessionLogForm } from './SessionLogForm';
 
 /**
  * Eine Einheit auf dem Heute-Screen: Inhalt, Begründung, Aktionen.
@@ -27,25 +21,9 @@ export function SessionCard({
   onMissed: (session: Session) => void;
 }) {
   const [logging, setLogging] = useState(false);
-  const [rpe, setRpe] = useState<number | null>(session.targetRpe);
-  const [duration, setDuration] = useState<string>(String(session.plannedDurationMin ?? ''));
-  const [distance, setDistance] = useState('');
-  const [feeling, setFeeling] = useState<SessionFeeling | null>(null);
-  const [note, setNote] = useState('');
+  const [newRecords, setNewRecords] = useState<string[]>([]);
 
   const done = session.status === 'done';
-
-  async function save() {
-    const entry: QuickLog = {
-      rpe,
-      durationMin: duration ? Number(duration) : null,
-      distanceKm: distance ? Number(distance.replace(',', '.')) : null,
-      feeling,
-      note: note.trim(),
-    };
-    await logSession(session, entry);
-    setLogging(false);
-  }
 
   return (
     <article className="rounded-lg border border-line bg-surface p-4">
@@ -85,92 +63,29 @@ export function SessionCard({
       </div>
 
       {logging ? (
-        <div className="rounded border border-ember-dim bg-ember/5 p-3">
-          <p className="mb-2 text-[11px] uppercase tracking-widest text-ember">Kurz protokollieren</p>
-
-          <p className="mb-1 text-xs text-ink-muted">Wie hart war es? (RPE)</p>
-          <div className="mb-3 grid grid-cols-10 gap-1">
-            {Array.from({ length: 10 }, (_, i) => i + 1).map((value) => (
-              <button
-                key={value}
-                onClick={() => setRpe(value)}
-                className={`rounded py-1.5 text-xs tabular transition-colors ${
-                  rpe === value
-                    ? 'bg-ember font-semibold text-void'
-                    : 'border border-line-strong text-ink-muted hover:border-ink-faint'
-                }`}
-              >
-                {value}
-              </button>
-            ))}
-          </div>
-
-          <div className="mb-3 grid grid-cols-2 gap-2">
-            <label className="block">
-              <span className="mb-1 block text-xs text-ink-muted">Dauer (Min)</span>
-              <input
-                type="number"
-                inputMode="numeric"
-                value={duration}
-                onChange={(e) => setDuration(e.target.value)}
-                className={`${inputClass} tabular`}
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs text-ink-muted">Distanz (km)</span>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={distance}
-                onChange={(e) => setDistance(e.target.value)}
-                placeholder="optional"
-                className={`${inputClass} tabular`}
-              />
-            </label>
-          </div>
-
-          <div className="mb-3 flex gap-2">
-            {FEELINGS.map((f) => (
-              <button
-                key={f.key}
-                onClick={() => setFeeling(feeling === f.key ? null : f.key)}
-                className={`flex-1 rounded border py-1.5 text-xs transition-colors ${
-                  feeling === f.key
-                    ? 'border-ember text-ember'
-                    : 'border-line-strong text-ink-muted hover:border-ink-faint'
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-
-          <input
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="Notiz (optional)"
-            className={`${inputClass} mb-3`}
-          />
-
-          <div className="flex gap-2">
-            <Button variant="primary" onClick={() => void save()}>
-              Speichern
-            </Button>
-            <Button onClick={() => setLogging(false)}>Abbrechen</Button>
-          </div>
-        </div>
+        <SessionLogForm
+          session={session}
+          onSaved={(records) => {
+            setNewRecords(records);
+            setLogging(false);
+          }}
+          onCancel={() => setLogging(false)}
+        />
       ) : (
-        <div className="flex flex-wrap gap-2">
-          {done ? (
-            <Button onClick={() => setLogging(true)}>Protokoll bearbeiten</Button>
-          ) : (
-            <>
-              <Button variant="primary" onClick={() => setLogging(true)}>
-                Erledigt
-              </Button>
-              <Button onClick={() => onMissed(session)}>Verpasst</Button>
-            </>
-          )}
+        <div>
+          <NewRecordsNotice records={newRecords} />
+          <div className="flex flex-wrap gap-2">
+            {done ? (
+              <Button onClick={() => setLogging(true)}>Protokoll bearbeiten</Button>
+            ) : (
+              <>
+                <Button variant="primary" onClick={() => setLogging(true)}>
+                  Erledigt
+                </Button>
+                <Button onClick={() => onMissed(session)}>Verpasst</Button>
+              </>
+            )}
+          </div>
         </div>
       )}
     </article>

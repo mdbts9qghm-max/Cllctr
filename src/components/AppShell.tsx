@@ -9,6 +9,7 @@ const NAV = [
   { href: '/', label: 'Heute' },
   { href: '/plan', label: 'Plan' },
   { href: '/aufgaben', label: 'Aufgaben' },
+  { href: '/statistik', label: 'Statistik' },
   { href: '/schicht', label: 'Schicht' },
   { href: '/setup', label: 'Setup' },
   { href: '/daten', label: 'Daten' },
@@ -35,17 +36,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <Link href="/" className="text-lg font-semibold tracking-[0.2em] text-ink">
           CLLCTR
         </Link>
-        <span className="text-[11px] uppercase tracking-widest text-ink-faint">Phase 4</span>
+        <span className="text-[11px] uppercase tracking-widest text-ink-faint">Phase 5</span>
       </header>
 
-      <nav className="flex gap-1 overflow-x-auto border-b border-line px-3 py-2">
+      {/* Sechs Einträge passen nicht nebeneinander auf ein Telefon — deshalb
+          kompakt und horizontal scrollbar, mit ausgeblendeter Scrollleiste. */}
+      <nav className="flex gap-0.5 overflow-x-auto border-b border-line px-2 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {NAV.map((item) => {
           const active = pathname === item.href;
           return (
             <Link
               key={item.href}
               href={item.href}
-              className={`rounded px-3 py-1.5 text-sm whitespace-nowrap transition-colors ${
+              className={`rounded px-2.5 py-1.5 text-[13px] whitespace-nowrap transition-colors ${
                 active
                   ? 'bg-surface-2 text-ember'
                   : 'text-ink-muted hover:bg-surface hover:text-ink'
