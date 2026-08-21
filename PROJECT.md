@@ -626,6 +626,42 @@ angeglichen.
 
 ---
 
+## Nachbesserung nach dem ersten Test auf dem Gerät
+
+Drei Dinge zeigten sich erst auf einem echten iPhone:
+
+### Der Inhalt lag unter der Statusleiste
+
+`apple-mobile-web-app-status-bar-style: black-translucent` lässt die Seite bis unter Uhr
+und Batterieanzeige laufen — das ist der Sinn der Einstellung, verlangt aber einen
+Ausgleich. Der Kopf hat jetzt `padding-top: calc(env(safe-area-inset-top) + 1.25rem)`.
+
+### Zeichen wie ▪ und ◆ sind unzuverlässig
+
+iOS rendert sie je nach Schrift als Emoji oder als leeren Kasten — auf dem Testgerät stand
+statt der Key-Session-Marke ein graues Rechteck. Alle Marken sind jetzt gezeichnete SVGs
+(`<Mark variant="solid" | "half" | "outline" />`), die überall gleich aussehen und die
+Rautenform des App-Symbols aufnehmen.
+
+### Der Heute-Screen war zu ausführlich
+
+Der komplette Ablauf und die Begründung standen offen auf dem Startbildschirm. Morgens
+will man nicht lesen, sondern wissen, was ansteht. Jetzt:
+
+- **Eingeklappt:** Titel groß, drei Eckdaten als Kacheln (Dauer, Zone, RPE), der Hauptteil
+  in einer Zeile — ohne Herzfrequenzbereich, der die Zeile umbrechen ließ.
+- **Beim Antippen:** der vollständige Ablauf und „Warum heute".
+- Datum, Schicht und Kapazität sitzen in einer Zeile statt in einer eigenen Karte.
+
+Ergebnis: Die Session-Karte endet nach 397 von 852 Pixeln — sie passt mit allem, was
+zählt, in die obere Hälfte des Bildschirms.
+
+Außerdem: Kopf und untere Leiste sind deckend statt durchscheinend (`backdrop-blur` auf
+einem fixierten Element kostet auf dem Telefon Leistung), und das „Doppeltag"-Etikett im
+Plan ist weg — die zweite Zeile sagt mit „↳ dazu" ohnehin, was los ist.
+
+---
+
 ## Entwicklung
 
 ```

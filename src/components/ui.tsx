@@ -98,6 +98,45 @@ export function CapacityBadge({ capacity, label }: { capacity: TrainingCapacity;
   );
 }
 
+/**
+ * Rauten-Marke.
+ *
+ * Bewusst als SVG und nicht als Zeichen wie ▪ oder ◆: iOS rendert solche
+ * Zeichen je nach Schrift als Emoji oder als leeren Kasten. Ein gezeichnetes
+ * Element sieht überall gleich aus.
+ */
+export function Mark({
+  variant = 'solid',
+  className = '',
+}: {
+  variant?: 'solid' | 'half' | 'outline';
+  className?: string;
+}) {
+  return (
+    <svg
+      viewBox="0 0 10 10"
+      aria-hidden="true"
+      className={`inline-block size-2.5 shrink-0 ${className}`}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+    >
+      <path d="M5 1l4 4-4 4-4-4z" strokeLinejoin="round" />
+      {variant === 'solid' ? <path d="M5 1l4 4-4 4-4-4z" fill="currentColor" /> : null}
+      {variant === 'half' ? <path d="M5 3l2 2-2 2-2-2z" fill="currentColor" stroke="none" /> : null}
+    </svg>
+  );
+}
+
+/** Kleine Faktenkachel — Dauer, Zone, RPE. Liest sich besser als eine Zeile mit Trennpunkten. */
+export function Chip({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="rounded border border-line-strong px-2 py-0.5 text-[11px] text-ink-muted tabular">
+      {children}
+    </span>
+  );
+}
+
 export function Notice({
   tone = 'info',
   children,

@@ -105,7 +105,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col">
-      <header className="flex items-center justify-between border-b border-line px-5 pb-4 pt-6">
+      {/* Der Statusleisten-Stil "black-translucent" lässt den Inhalt unter die
+          Uhr und die Batterieanzeige laufen. Ohne diesen Abstand klebt die
+          Überschrift dort fest. */}
+      <header className="relative z-20 flex items-center justify-between border-b border-line bg-void px-5 pb-4 pt-[calc(env(safe-area-inset-top)+1.25rem)]">
         <Link href="/" className="text-lg font-semibold tracking-[0.2em] text-ink">
           CLLCTR
         </Link>
@@ -136,7 +139,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         )}
       </main>
 
-      <nav className="fixed inset-x-0 bottom-0 z-10 border-t border-line bg-void/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
+      {/* Deckend statt durchscheinend: backdrop-blur auf einem fixierten Element
+          kostet auf dem Telefon Leistung und lässt den Inhalt durchschimmern. */}
+      <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-void pb-[env(safe-area-inset-bottom)]">
         <div className="mx-auto flex w-full max-w-2xl">
           {TABS.map((tab) => {
             const active = pathname === tab.href;

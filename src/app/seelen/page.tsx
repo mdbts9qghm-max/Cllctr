@@ -6,7 +6,7 @@ import { formatShort } from '@/lib/dates';
 import { getSoulsInReach } from '@/lib/soul-store';
 import { RARITY_ORDER, SOUL_CATALOG } from '@/lib/souls';
 import { RARITY_LABEL, type Soul, type SoulRarity } from '@/lib/types';
-import { Section } from '@/components/ui';
+import { Mark, Section } from '@/components/ui';
 
 /**
  * Seltenheit über eine einzige Akzentfarbe abgestuft, nicht über einen
@@ -22,10 +22,10 @@ const RARITY_STYLE: Record<SoulRarity, { border: string; mark: string; glow: str
   common: { border: 'border-line-strong', mark: 'text-ink-faint', glow: '' },
 };
 
-const RARITY_MARK: Record<SoulRarity, string> = {
-  legendary: '◆',
-  rare: '◈',
-  common: '◇',
+const RARITY_VARIANT: Record<SoulRarity, 'solid' | 'half' | 'outline'> = {
+  legendary: 'solid',
+  rare: 'half',
+  common: 'outline',
 };
 
 export default function SeelenPage() {
@@ -81,7 +81,7 @@ export default function SeelenPage() {
         <div className="mt-3 flex flex-wrap gap-4">
           {(['legendary', 'rare', 'common'] as SoulRarity[]).map((r) => (
             <span key={r} className="flex items-center gap-1.5 text-xs text-ink-muted tabular">
-              <span className={RARITY_STYLE[r].mark}>{RARITY_MARK[r]}</span>
+              <Mark variant={RARITY_VARIANT[r]} className={RARITY_STYLE[r].mark} />
               {byRarity(r)} {RARITY_LABEL[r]}
             </span>
           ))}
@@ -99,7 +99,7 @@ export default function SeelenPage() {
                   className={`rounded-lg border bg-surface p-4 ${style.border} ${style.glow}`}
                 >
                   <div className="mb-1 flex items-baseline gap-2">
-                    <span className={`text-sm ${style.mark}`}>{RARITY_MARK[newest.rarity]}</span>
+                    <Mark variant={RARITY_VARIANT[newest.rarity]} className={style.mark} />
                     <h3 className="flex-1 font-medium text-ink">
                       {newest.name}
                       {count > 1 ? (
@@ -153,7 +153,7 @@ export default function SeelenPage() {
                   className="rounded-lg border border-dashed border-line bg-surface/40 p-4"
                 >
                   <div className="mb-1 flex items-baseline gap-2">
-                    <span className="text-sm text-ink-faint">{RARITY_MARK[definition.rarity]}</span>
+                    <Mark variant={RARITY_VARIANT[definition.rarity]} className="text-ink-faint" />
                     <h3 className="flex-1 text-ink-muted">{definition.name}</h3>
                     <span className="shrink-0 text-[11px] uppercase tracking-wider text-ink-faint">
                       {RARITY_LABEL[definition.rarity]}

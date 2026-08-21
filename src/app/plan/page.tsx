@@ -17,7 +17,7 @@ import {
 } from '@/lib/plan-store';
 import type { ReschedulePlan } from '@/lib/replan';
 import { SESSION_STATUS_LABEL, type Session, type Soul } from '@/lib/types';
-import { Button, Card, Notice, Section } from '@/components/ui';
+import { Button, Card, Mark, Notice, Section } from '@/components/ui';
 import { NewRecordsNotice, SessionLogForm } from '@/components/SessionLogForm';
 
 const MESOCYCLE_COUNT = 3;
@@ -223,11 +223,6 @@ export default function PlanPage() {
                 a.date.localeCompare(b.date) ||
                 (a.discipline === 'run' ? 0 : 1) - (b.discipline === 'run' ? 0 : 1),
             );
-            const doubleDates = new Set(
-              list
-                .map((s) => s.date)
-                .filter((d, i, all) => all.indexOf(d) !== i),
-            );
             const isActive = micro.id === activeMicro?.id;
 
             return (
@@ -251,7 +246,6 @@ export default function PlanPage() {
                     const day = resolveShiftDay(session.date, ctx);
                     const open = openId === session.id;
                     const dimmed = session.status === 'skipped' || session.status === 'missed';
-                    const isDouble = doubleDates.has(session.date);
                     const isSecond = si > 0 && list[si - 1].date === session.date;
 
                     return (
@@ -280,14 +274,12 @@ export default function PlanPage() {
                               </>
                             )}
                           </span>
-                          <span className="flex-1 truncate text-sm text-ink">
-                            {session.title}
-                            {session.isKey ? <span className="text-ember"> ▪</span> : null}
-                            {isDouble && !isSecond ? (
-                              <span className="ml-1 text-[10px] uppercase tracking-wider text-ember">
-                                Doppeltag
-                              </span>
-                            ) : null}
+                          {/* Kein "Doppeltag"-Etikett: die zweite Zeile sagt mit
+                              "↳ dazu" ohnehin, was los ist, und das Wort drückt
+                              den Titel zusammen. */}
+                          <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-ink">
+                            <span className="min-w-0 truncate">{session.title}</span>
+                            {session.isKey ? <Mark variant="solid" className="text-ember" /> : null}
                           </span>
                           <span className="shrink-0 text-[11px] text-ink-faint tabular">
                             {session.plannedDurationMin} Min

@@ -7,7 +7,7 @@ import { getSessionLog, logSession, type QuickLog } from '@/lib/plan-store';
 import { formatRecordValue, PR_KIND_LABEL, recordSets, type SetInput } from '@/lib/pr';
 import { syncSouls } from '@/lib/soul-store';
 import type { Exercise, Session, SessionFeeling, Soul } from '@/lib/types';
-import { Button, inputClass } from './ui';
+import { Button, inputClass, Mark } from './ui';
 
 const FEELINGS: Array<{ key: SessionFeeling; label: string }> = [
   { key: 'good', label: 'Gut' },
@@ -281,10 +281,13 @@ export function NewRecordsNotice({ records, souls = [] }: { records: string[]; s
           </p>
           {souls.map((soul) => (
             <div key={soul.id} className="mb-2 last:mb-0">
-              <p className="text-sm font-medium text-ink">
-                <span className="text-ember">
-                  {soul.rarity === 'legendary' ? '◆' : soul.rarity === 'rare' ? '◈' : '◇'}
-                </span>{' '}
+              <p className="flex items-center gap-1.5 text-sm font-medium text-ink">
+                <Mark
+                  variant={
+                    soul.rarity === 'legendary' ? 'solid' : soul.rarity === 'rare' ? 'half' : 'outline'
+                  }
+                  className="text-ember"
+                />
                 {soul.name}
               </p>
               <p className="text-xs leading-relaxed text-ink-muted">{soul.description}</p>

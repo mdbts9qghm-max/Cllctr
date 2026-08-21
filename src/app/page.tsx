@@ -14,7 +14,7 @@ import { completeTask } from '@/lib/task-store';
 import { getSoulsInReach } from '@/lib/soul-store';
 import type { ReschedulePlan } from '@/lib/replan';
 import { CAPACITY_LABEL, TASK_ENERGY_LABEL, type Session, type Task } from '@/lib/types';
-import { Button, CapacityBadge, Card, Notice, Section } from '@/components/ui';
+import { Button, CapacityBadge, Card, Mark, Notice, Section } from '@/components/ui';
 import { SessionCard } from '@/components/SessionCard';
 
 /** Tage in der Vorschau "Als Nächstes". */
@@ -102,33 +102,33 @@ export default function HeutePage() {
     <>
       {/* 1 — Der Tag und was heute ansteht */}
       <section className="mb-8">
-        <div className="mb-3 flex items-baseline justify-between">
-          <h1 className="text-xs font-semibold uppercase tracking-[0.18em] text-ink-faint">
-            {formatShort(todayIso)}
-          </h1>
-          <CapacityBadge capacity={day.capacity} label={CAPACITY_LABEL[day.capacity]} />
-        </div>
-
+        {/* Datum, Schicht und Kapazität in einer Zeile: die eigene Karte dafür
+            hat nur Platz gekostet, ohne mehr zu sagen. */}
         <Link
           href="/schicht"
-          className="mb-3 flex items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3 transition-colors hover:border-line-strong"
+          className="mb-4 flex items-center gap-2.5 rounded-lg px-1 py-1 transition-colors hover:bg-surface"
         >
           <span
-            className="flex size-8 shrink-0 items-center justify-center rounded text-sm font-bold text-void"
+            className="flex size-7 shrink-0 items-center justify-center rounded text-xs font-bold text-void"
             style={{ backgroundColor: day.shiftType.color }}
           >
             {day.shiftType.short}
           </span>
-          <div className="min-w-0 flex-1">
-            <p className="truncate font-medium text-ink">{day.shiftType.name}</p>
-            <p className="truncate text-xs text-ink-faint tabular">
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm text-ink">
+              {formatShort(todayIso)} · {day.shiftType.name}
+            </span>
+            <span className="block truncate text-[11px] text-ink-faint tabular">
+              {/* An freien Tagen sagt das Zeitfenster dasselbe wie die Zeitangabe —
+                  dann bleibt es weg. */}
               {day.shiftType.startTime && day.shiftType.endTime
-                ? `${day.shiftType.startTime}–${day.shiftType.endTime}`
+                ? `${day.shiftType.startTime}–${day.shiftType.endTime}${
+                    day.shiftType.trainingWindow ? ` · ${day.shiftType.trainingWindow}` : ''
+                  }`
                 : 'ganzer Tag frei'}
-              {day.shiftType.trainingWindow ? ` · Training ${day.shiftType.trainingWindow}` : ''}
-            </p>
-          </div>
-          <span className="shrink-0 text-ink-faint">›</span>
+            </span>
+          </span>
+          <CapacityBadge capacity={day.capacity} label={CAPACITY_LABEL[day.capacity]} />
         </Link>
 
         {message ? (
@@ -197,9 +197,10 @@ export default function HeutePage() {
             ))}
           </div>
         ) : data.hasPlan ? (
-          <Card>
-            <p className="mb-2 text-lg font-medium text-ink">Ruhetag</p>
-            <p className="text-sm leading-relaxed text-ink-muted">{rest.reason}</p>
+          <div className="rounded-xl border border-line bg-surface px-4 py-5">
+            <p className="text-[10px] uppercase tracking-widest text-ink-faint">Heute</p>
+            <p className="mt-1 text-2xl font-semibold text-ink">Ruhetag</p>
+            <p className="mt-2 text-sm leading-relaxed text-ink-muted">{rest.reason}</p>
             {rest.notes.length > 0 ? (
               <ul className="mt-2 space-y-1">
                 {rest.notes.map((note, i) => (
@@ -209,7 +210,7 @@ export default function HeutePage() {
                 ))}
               </ul>
             ) : null}
-          </Card>
+          </div>
         ) : (
           <Notice tone="warn">
             Noch kein Trainingsplan.{' '}
@@ -356,7 +357,7 @@ export default function HeutePage() {
                         : 'Ruhetag'}
                     </span>
                     {onDay.some((s) => s.isKey) ? (
-                      <span className="shrink-0 text-ember">▪</span>
+                      <Mark variant="solid" className="text-ember" />
                     ) : null}
                   </div>
                 );
@@ -377,13 +378,16 @@ export default function HeutePage() {
                 className="block rounded border border-line bg-surface px-3 py-2.5 transition-colors hover:border-line-strong"
               >
                 <div className="mb-1 flex items-baseline gap-2">
-                  <span className="text-xs text-ember-dim">
-                    {progress.definition.rarity === 'legendary'
-                      ? '◆'
-                      : progress.definition.rarity === 'rare'
-                        ? '◈'
-                        : '◇'}
-                  </span>
+                  <Mark
+                    variant={
+                      progress.definition.rarity === 'legendary'
+                        ? 'solid'
+                        : progress.definition.rarity === 'rare'
+                          ? 'half'
+                          : 'outline'
+                    }
+                    className="text-ember-dim"
+                  />
                   <span className="flex-1 truncate text-sm text-ink">{progress.definition.name}</span>
                   <span className="shrink-0 text-[11px] text-ink-faint tabular">
                     {progress.current} / {progress.target} {progress.unit}
@@ -405,9 +409,12 @@ export default function HeutePage() {
                 key={soul.id}
                 className="flex items-center gap-2 rounded border border-line bg-surface px-3 py-2"
               >
-                <span className="text-xs text-ember">
-                  {soul.rarity === 'legendary' ? '◆' : soul.rarity === 'rare' ? '◈' : '◇'}
-                </span>
+                <Mark
+                  variant={
+                    soul.rarity === 'legendary' ? 'solid' : soul.rarity === 'rare' ? 'half' : 'outline'
+                  }
+                  className="text-ember"
+                />
                 <span className="flex-1 truncate text-sm text-ink">{soul.name}</span>
                 <span className="shrink-0 text-[11px] text-ink-faint tabular">
                   {formatShort(soul.collectedAt.slice(0, 10))}
