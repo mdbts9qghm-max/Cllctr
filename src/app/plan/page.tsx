@@ -5,7 +5,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 import { formatShort, today, weekdayShort } from '@/lib/dates';
 import { useSettings, useShiftContext } from '@/lib/hooks';
-import { resolveShiftDay } from '@/lib/shifts';
+import { capacityAllows, resolveShiftDay } from '@/lib/shifts';
 import {
   applyRescheduleProposal,
   buildRescheduleProposal,
@@ -247,15 +247,21 @@ export default function PlanPage() {
                     const open = openId === session.id;
                     const dimmed = session.status === 'skipped' || session.status === 'missed';
                     const isSecond = si > 0 && list[si - 1].date === session.date;
+                    // Nach einer nachträglich geänderten Schicht kann eine
+                    // geplante Einheit an einem Tag stehen, der sie nicht trägt.
+                    const conflict =
+                      session.status === 'planned' && !capacityAllows(day.capacity, session.type);
 
                     return (
                       <div key={session.id}>
                         <button
                           onClick={() => setOpenId(open ? null : session.id)}
                           className={`flex w-full items-center gap-3 rounded border px-3 py-2.5 text-left transition-colors ${
-                            session.date === todayIso
-                              ? 'border-ember bg-surface'
-                              : 'border-line bg-surface hover:border-line-strong'
+                            conflict
+                              ? 'border-ember-dim bg-ember/5'
+                              : session.date === todayIso
+                                ? 'border-ember bg-surface'
+                                : 'border-line bg-surface hover:border-line-strong'
                           } ${dimmed ? 'opacity-45' : ''}`}
                         >
                           <span
@@ -281,8 +287,12 @@ export default function PlanPage() {
                             <span className="min-w-0 truncate">{session.title}</span>
                             {session.isKey ? <Mark variant="solid" className="text-ember" /> : null}
                           </span>
-                          <span className="shrink-0 text-[11px] text-ink-faint tabular">
-                            {session.plannedDurationMin} Min
+                          <span
+                            className={`shrink-0 text-[11px] tabular ${
+                              conflict ? 'text-ember' : 'text-ink-faint'
+                            }`}
+                          >
+                            {conflict ? 'passt nicht' : `${session.plannedDurationMin} Min`}
                           </span>
                         </button>
 
@@ -303,6 +313,22 @@ export default function PlanPage() {
                                 </li>
                               ))}
                             </ul>
+
+                            {conflict ? (
+                              <div className="mb-3 rounded border border-ember-dim bg-ember/10 p-3">
+                                <p className="text-[10px] uppercase tracking-widest text-ember">
+                                  Passt nicht mehr
+                                </p>
+                                <p className="mt-1 text-sm leading-relaxed text-ink">
+                                  {day.shiftType.name} an diesem Tag trägt {session.title} nicht.
+                                </p>
+                                <div className="mt-2">
+                                  <Button variant="primary" onClick={() => void handleMissed(session)}>
+                                    Umplanen
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : null}
 
                             {session.rescheduleReason ? (
                               <p className="mb-3 rounded border border-line bg-surface p-2 text-xs leading-relaxed text-ink-muted">

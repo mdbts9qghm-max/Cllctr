@@ -41,11 +41,14 @@ export function SessionCard({
   session,
   explanation,
   onMissed,
+  conflict = null,
   defaultExpanded = false,
 }: {
   session: Session;
   explanation: SessionExplanation;
   onMissed: (session: Session) => void;
+  /** Gesetzt, wenn der Tag diese Einheit nicht mehr trägt. */
+  conflict?: { reason: string; onReplan: () => void } | null;
   defaultExpanded?: boolean;
 }) {
   const [logging, setLogging] = useState(false);
@@ -59,9 +62,20 @@ export function SessionCard({
   return (
     <article
       className={`overflow-hidden rounded-xl border bg-surface ${
-        done ? 'border-line' : 'border-line-strong'
+        conflict ? 'border-ember' : done ? 'border-line' : 'border-line-strong'
       }`}
     >
+      {conflict ? (
+        <div className="border-b border-ember-dim bg-ember/10 px-4 py-3">
+          <p className="text-[10px] uppercase tracking-widest text-ember">Passt nicht mehr</p>
+          <p className="mt-1 text-sm leading-relaxed text-ink">{conflict.reason}</p>
+          <div className="mt-2">
+            <Button variant="primary" onClick={conflict.onReplan}>
+              Umplanen
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {/* Kopf: antippbar, klappt die Details auf. */}
       <button
         onClick={() => setExpanded(!expanded)}

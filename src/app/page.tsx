@@ -6,7 +6,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 import { addDays, formatShort, today, weekdayShort } from '@/lib/dates';
 import { useSettings, useShiftContext } from '@/lib/hooks';
-import { capacityExplanation, resolveShiftDay, resolveShiftRange } from '@/lib/shifts';
+import { capacityAllows, capacityExplanation, resolveShiftDay, resolveShiftRange } from '@/lib/shifts';
 import { blockStatus, explainRestDay, explainSession } from '@/lib/explain';
 import { applyRescheduleProposal, buildRescheduleProposal, markSessionMissed } from '@/lib/plan-store';
 import { appointmentsOn, suggestTasks, taskEnergyBudget, tasksBlockedByEnergy } from '@/lib/tasks';
@@ -70,6 +70,18 @@ export default function HeutePage() {
     .sort((a, b) => a.date.localeCompare(b.date) || byRunFirst(a, b));
 
   const nextSession = upcoming[0] ?? null;
+
+  /**
+   * Passt die Einheit noch zu dem, was der Tag hergibt?
+   *
+   * Trägt man eine Schicht nachträglich ein — Tausch, Krankheit —, steht die
+   * geplante Einheit plötzlich an einem Tag, der sie nicht mehr trägt. Ohne
+   * diese Prüfung bliebe sie stumm stehen und man müsste selbst merken, dass
+   * der Plan nicht mehr stimmt.
+   */
+  function fits(session: Session): boolean {
+    return capacityAllows(day.capacity, session.type);
+  }
 
   async function handleMissed(session: Session) {
     if (!ctx || !settings) return;
@@ -193,6 +205,14 @@ export default function HeutePage() {
                   previousDay: yesterdaySessions,
                 })}
                 onMissed={(s) => void handleMissed(s)}
+                conflict={
+                  fits(session)
+                    ? null
+                    : {
+                        reason: `${day.shiftType.name} lässt das heute nicht mehr zu.`,
+                        onReplan: () => void handleMissed(session),
+                      }
+                }
               />
             ))}
           </div>
@@ -351,10 +371,10 @@ export default function HeutePage() {
                     <span className="w-10 shrink-0 text-xs text-ink-muted tabular">
                       {weekdayShort(d.date)}
                     </span>
-                    <span className="flex-1 truncate text-sm text-ink-muted">
-                      {onDay.length > 0
-                        ? onDay.map((s) => s.title).join(' + ')
-                        : 'Ruhetag'}
+                    {/* An einem Doppeltag stehen zwei Titel in der Zeile — die
+                        darf dann umbrechen statt abzuschneiden. */}
+                    <span className="flex-1 text-sm leading-snug text-ink-muted">
+                      {onDay.length > 0 ? onDay.map((s) => s.title).join(' + ') : 'Ruhetag'}
                     </span>
                     {onDay.some((s) => s.isKey) ? (
                       <Mark variant="solid" className="text-ember" />

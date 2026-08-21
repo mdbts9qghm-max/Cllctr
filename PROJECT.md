@@ -28,11 +28,17 @@ Diese Entscheidungen prägen das gesamte Datenmodell. Ändern sie sich, ändert 
 
 | Schichtart | Zeit | Kapazität | Begründung |
 |---|---|---|---|
-| Tagschicht | 07:00–19:00 | `light` | 12 h Arbeit, danach höchstens kurz und locker |
+| Tagschicht | 07:00–19:00 | `none` | 12 h Arbeit — danach ist nichts mehr drin |
 | Nachtschicht | 19:00–07:00 | `moderate` | Der Vormittag vor der Schicht ist frei: normales Volumen inklusive Kraft |
 | Schlaftag | Schlaf 08:00–14:00 | `moderate` | Ab ca. 15:00 normales Volumen, keine Key-Session |
 | Freischicht | ganzer Tag | `full` | Hier liegen die harten Einheiten |
 | V-Schicht | 08:00–20:00 | `light` | Kommt kurzfristig vor einer Tagschicht — **nicht** Teil der Rotation, wird als Abweichung gesetzt |
+
+Nach der Tagschicht ist kein Training mehr vorgesehen. Damit liefert die Rotation pro
+Woche 2,8 volle und 2,8 halbe Tage; das Urteil bleibt **passt**, das erzeugte Volumen
+2,9× Kraft und 3,0× Laufen. Die kurze Krafteinheit (`strength_short`) taucht im
+Standardplan dadurch nicht mehr auf — sie greift nur noch, wenn eine Schichtart mit
+`light` im Spiel ist, etwa die V-Schicht.
 
 **Rotation:** `Tagschicht → Nachtschicht → Schlaftag → frei → frei` (5 Tage)
 
@@ -659,6 +665,31 @@ zählt, in die obere Hälfte des Bildschirms.
 Außerdem: Kopf und untere Leiste sind deckend statt durchscheinend (`backdrop-blur` auf
 einem fixierten Element kostet auf dem Telefon Leistung), und das „Doppeltag"-Etikett im
 Plan ist weg — die zweite Zeile sagt mit „↳ dazu" ohnehin, was los ist.
+
+---
+
+## Konflikte nach einem Schichttausch
+
+Trägt man eine Schicht nachträglich ein — Tausch, Krankheit, kurzfristige V-Schicht —,
+steht eine bereits geplante Einheit plötzlich an einem Tag, der sie nicht mehr trägt.
+Vorher blieb sie dort stumm stehen; man musste selbst darauf kommen, dass der Plan nicht
+mehr stimmt.
+
+Jetzt prüft die App bei jeder Anzeige, ob `capacityAllows(Tageskapazität, Session-Typ)`
+noch gilt, und zeigt den Konflikt an drei Stellen:
+
+| Screen | Anzeige |
+|---|---|
+| Schicht | Hinweis mit Anzahl und Titeln, direkt nach dem Setzen der Abweichung |
+| Heute | Band über der Karte: „Passt nicht mehr" plus Knopf **Umplanen** |
+| Plan | Zeile hervorgehoben, statt der Dauer steht „passt nicht"; im Detail derselbe Knopf |
+
+Der Knopf führt in den bestehenden Umplanungs-Vorschlag — es braucht dafür keine eigene
+Logik, nur den Anlass.
+
+Durchgespielt: heutigen Tag auf Tagschicht setzen → Warnung auf drei Screens → Umplanen →
+Intervalle rücken auf den nächsten freien Tag, die verdrängte Krafteinheit sucht sich
+selbst einen Platz → heute ist Ruhetag, keine offenen Konflikte mehr.
 
 ---
 

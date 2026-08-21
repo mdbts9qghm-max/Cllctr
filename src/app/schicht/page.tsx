@@ -1,10 +1,12 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { db } from '@/lib/db';
 import { addDays, formatShort, today, weekdayShort } from '@/lib/dates';
 import { now } from '@/lib/ids';
-import { capacityExplanation, checkFeasibility, resolveShiftRange } from '@/lib/shifts';
+import { capacityAllows, capacityExplanation, checkFeasibility, resolveShiftRange } from '@/lib/shifts';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { useSettings, useShiftContext } from '@/lib/hooks';
 import { CAPACITY_LABEL, CAPACITY_SHORT, type IsoDate } from '@/lib/types';
 import { Button, CapacityBadge, Card, Field, inputClass, Notice, Section } from '@/components/ui';
@@ -15,13 +17,28 @@ export default function SchichtPage() {
   const ctx = useShiftContext();
   const settings = useSettings();
   const [openDay, setOpenDay] = useState<IsoDate | null>(null);
+  const plannedSessions = useLiveQuery(
+    () => db.sessions.where('status').equals('planned').toArray(),
+    [],
+  );
 
-  if (!ctx || !settings) return <p className="text-sm text-ink-faint">Lade …</p>;
+  if (!ctx || !settings || !plannedSessions) return <p className="text-sm text-ink-faint">Lade …</p>;
 
   const start = today();
   const days = resolveShiftRange(start, addDays(start, PREVIEW_DAYS - 1), ctx);
   const pattern = ctx.pattern;
   const feasibility = checkFeasibility(start, ctx, settings.weeklyTargets);
+
+  /**
+   * Einheiten, die nach einer geänderten Schicht nicht mehr auf ihren Tag
+   * passen. Ohne diesen Hinweis müsste man selbst darauf kommen, dass der Plan
+   * nach einem Schichttausch nicht mehr stimmt.
+   */
+  const byDate = new Map(days.map((d) => [d.date, d]));
+  const misfits = plannedSessions.filter((session) => {
+    const day = byDate.get(session.date);
+    return day !== undefined && !capacityAllows(day.capacity, session.type);
+  });
   const round = (n: number) => Math.round(n * 10) / 10;
 
   async function setOverride(date: IsoDate, shiftTypeId: string | null) {
@@ -104,6 +121,26 @@ export default function SchichtPage() {
           </Card>
         )}
       </Section>
+
+      {misfits.length > 0 ? (
+        <div className="mb-8">
+          <Notice tone="warn">
+            <span className="mb-1 block font-medium text-ink">
+              {misfits.length === 1
+                ? 'Eine geplante Einheit passt nicht mehr zu ihrem Tag.'
+                : `${misfits.length} geplante Einheiten passen nicht mehr zu ihrem Tag.`}
+            </span>
+            {misfits.slice(0, 3).map((session) => (
+              <span key={session.id} className="block text-xs">
+                · {session.title} am {formatShort(session.date)}
+              </span>
+            ))}
+            <Link href="/plan" className="mt-2 block text-sm text-ember underline">
+              Im Plan umplanen
+            </Link>
+          </Notice>
+        </div>
+      ) : null}
 
       <Section
         title="Passt das zusammen?"
