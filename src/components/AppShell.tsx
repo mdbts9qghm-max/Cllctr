@@ -7,6 +7,7 @@ import { seedIfEmpty } from '@/lib/seed';
 
 const NAV = [
   { href: '/', label: 'Heute' },
+  { href: '/plan', label: 'Plan' },
   { href: '/schicht', label: 'Schicht' },
   { href: '/setup', label: 'Setup' },
   { href: '/daten', label: 'Daten' },
@@ -33,7 +34,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <Link href="/" className="text-lg font-semibold tracking-[0.2em] text-ink">
           CLLCTR
         </Link>
-        <span className="text-[11px] uppercase tracking-widest text-ink-faint">Phase 1</span>
+        <span className="text-[11px] uppercase tracking-widest text-ink-faint">Phase 2</span>
       </header>
 
       <nav className="flex gap-1 overflow-x-auto border-b border-line px-3 py-2">

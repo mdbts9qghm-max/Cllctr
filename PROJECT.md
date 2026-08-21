@@ -21,6 +21,7 @@ Diese Entscheidungen prägen das gesamte Datenmodell. Ändern sie sich, ändert 
 | Kraft-Struktur | Ober-/Unterkörper-Split |
 | Intensität | RPE + eigene Herzfrequenz-Zonen (Ruhe-HF 49, max. HF 205) |
 | Umplanen | Vorschlag zeigen, Nutzer bestätigt |
+| Planungsprofil | Laufen hat Vorrang (umschaltbar im Setup) |
 | **Arbeitszeit** | **12-Stunden-Schichten in Rotation** |
 
 ### Der Schichtplan ist die wichtigste Randbedingung
@@ -153,7 +154,7 @@ deshalb bereits in Phase 1 gebaut, nicht am Ende.
 | Phase | Inhalt | Status |
 |---|---|---|
 | 1 | Setup, Datenmodell, IndexedDB, Schichtauflösung, Export/Import | **fertig** |
-| 2 | Trainingsplanung: Generator + adaptives Umplanen | offen |
+| 2 | Trainingsplanung: Generator + adaptives Umplanen | **fertig** |
 | 3 | Heute-Screen | offen |
 | 4 | Tasks | offen |
 | 5 | Statistiken (`recharts`) | offen |
@@ -183,20 +184,95 @@ Mit der echten Rotation und den Zielen 3× Kraft, 2× Laufen, 1× optional:
 | Lockere Tage (Tag-/Nachtschicht) | 2,8 |
 | Urteil | **knapp** — in schwachen Wochen fehlt ein harter Tag |
 
-Das ist lösbar, aber nur über mehrere Zyklen hinweg: pro 5-Tage-Zyklus passen zwei
-Key-Sessions auf die freien Tage, Kraft Oberkörper auf den Schlaftag, ein Recovery-Lauf
-auf die Tagschicht. Welche zwei der drei harten Einheiten die freien Tage bekommen,
-muss der Generator rotieren.
+Der Generator löst das über mehrere Zyklen hinweg. Tatsächlich erzeugtes Volumen:
+**3,1× Kraft und 2,8× Laufen pro Woche** — beide Ziele erreicht.
 
-### Offene Punkte für Phase 2
+---
 
-1. **Offene Entscheidung:** Ist der Planungszyklus die Kalenderwoche (Mo–So) oder der
-   5-Tage-Rotationszyklus? Betrifft `Microcycle` und die gesamte Fortschrittsanzeige.
-2. Generator: Wochenziele → konkrete Sessions auf konkrete Tage, mit Rotation der
-   Key-Sessions über die knappen vollen Tage.
-3. Umplaner: Key-Sessions verschieben, Filler streichen, zwei harte Tage nie
-   hintereinander, Begründung ausgeben.
-4. Deload-Erkennung über `Microcycle.plannedLoad` und RPE-Verlauf.
+## Phase 2 — Generator und Umplaner
+
+### Planungstakt: Rotationszyklus, angezeigt in Wochen
+
+Ein **Mikrozyklus ist ein Durchlauf der Schichtrotation** (5 Tage), keine Kalenderwoche.
+Nur so ist jeder Zyklus gleich aufgebaut. Ein Mesozyklus besteht aus 4 Belastungs- und
+1 Deload-Zyklus (25 Tage, konfigurierbar).
+
+Die Wochenziele sind auf 7 Tage bezogen, ein Zyklus dauert 5. Der Generator führt deshalb
+einen **Übertrag** zwischen den Zyklen mit: mal kommen 2, mal 3 Krafteinheiten in den
+Zyklus — im Schnitt genau 3 pro Woche. Ohne Übertrag würde jedes Mal abgerundet und das
+Volumen dauerhaft zu niedrig ausfallen.
+
+### Der Engpass: zwei volle Tage, drei harte Einheiten
+
+Pro Zyklus lassen nur zwei Tage volle Belastung zu, aber Intervalle, Long Run und Kraft
+Unterkörper wollen alle dorthin. Das **Planungsprofil** entscheidet:
+
+| Profil | Wirkung |
+|---|---|
+| `runFirst` | Laufen bekommt die freien Tage zuerst und darf beim Umplanen Kraft verdrängen |
+| `strengthFirst` | umgekehrt |
+| `balanced` | wechselt je Zyklus; beim Umplanen verdrängt niemand jemanden |
+
+Dazu kommt `allowStrengthOnLightDays`: eine kurze Krafteinheit (35 Min) an Schichttagen.
+**Ohne diese Option sinkt das Kraftvolumen von 3,1 auf 1,5 Einheiten pro Woche** — die
+Rotation gibt sonst nicht mehr her.
+
+### Platzierung in zwei Durchgängen
+
+1. **Best-Fit** — unter den möglichen Tagen gewinnt der mit der *niedrigsten* ausreichenden
+   Kapazität, damit volle Tage für das frei bleiben, was sie wirklich braucht. Sortiert wird
+   zuerst nach Kapazitätsanspruch, dann nach Profil: sonst belegt ein lockerer Lauf den
+   einzigen Schlaftag, bevor die Krafteinheit überhaupt geprüft wird.
+2. **Aufwerten** — musste ein Wunsch auf einen Ersatztyp ausweichen und ist danach doch ein
+   besserer Tag frei geblieben, zieht die Session dorthin um und bekommt ihre volle Form
+   zurück. Ohne diesen Durchgang läge eine abgespeckte Einheit am 12-Stunden-Tag, während
+   der freie Tag ungenutzt bleibt.
+
+### Belastungsregeln
+
+- **Harter Tag** ab `load ≥ 7`. Gemeint ist systemische und Bein-Ermüdung — Kraft Oberkörper
+  liegt bewusst bei 6, sonst würde die Regel diese Einheit dauerhaft blockieren, weil die
+  beiden freien Tage nebeneinander liegen.
+- **Höchstens 2 harte Tage in Folge.** Die reine Lehre sagt „nie zwei am Stück"; diese
+  Rotation stellt die freien Tage aber direkt nebeneinander — mit einer strikten Eins bliebe
+  einer davon dauerhaft ungenutzt.
+- **Dieselbe Einheit nie an zwei aufeinanderfolgenden Tagen**, unabhängig von der Härte:
+  dieselbe Muskulatur bekäme sonst keine 24 Stunden Erholung.
+- **Eine Einheit pro Tag.**
+
+### Adaptives Umplanen (`replan.ts`)
+
+Bei einer verpassten Einheit, in dieser Reihenfolge:
+
+1. Filler (Recovery, lockeres Volumen, Mobility) fallen ersatzlos weg.
+2. Key-Sessions suchen einen Ersatztag mit genug Kapazität.
+3. Lockere Einheiten am Zieltag weichen.
+4. Ist kein Tag frei, greift das **Planungsprofil**: eine Laufeinheit darf eine Krafteinheit
+   verdrängen, aber nie umgekehrt. Die verdrängte Einheit sucht sich selbst einen neuen Tag
+   (eine Kaskadenstufe, danach entfällt sie).
+5. Erst dann die **reduzierte Form** — ein Long Run wird zum lockeren Dauerlauf. Kleiner ist
+   besser als gar nicht.
+6. Bleibt alles erfolglos, entfällt die Einheit — mit Begründung, welche Tage im Weg standen.
+
+Fixierte Einheiten (`locked`) fasst der Umplaner nie an. Jeder Vorschlag wird erklärt und
+erst nach Bestätigung angewendet.
+
+### Geprüft
+
+Automatisierte Durchläufe (nicht im Repo, in der Sitzung ausgeführt):
+
+- Generator über 3 Startdaten × 3 Profile: keine Regelverletzung, keine Doppelbelegung
+- 40 aufeinanderfolgende Umplanungen: alle Regeln halten
+- Ende-zu-Ende im Browser: Plan erzeugen, Einheit verpassen, Vorschlag übernehmen
+
+### Offene Punkte
+
+1. **Deload-Erkennung** über RPE-Verlauf und `plannedLoad` ist noch nicht gebaut — bisher
+   ist der Deload nur fest im Zyklusraster. Kommt mit den Logs in Phase 5.
+2. Sessions lassen sich noch nicht frei bearbeiten (Typ, Dauer, Inhalt), nur fixieren,
+   abhaken, verpassen.
+3. Vereinzelt findet eine Einheit in einem Zyklus keinen Tag. Der Plan-Screen meldet das,
+   still verschluckt wird es nicht.
 
 ---
 

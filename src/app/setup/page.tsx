@@ -5,8 +5,10 @@ import { now } from '@/lib/ids';
 import { useSettings, useShiftContext } from '@/lib/hooks';
 import {
   CAPACITY_LABEL,
+  PLANNING_PROFILE_LABEL,
   type HrZone,
   type HrZoneNumber,
+  type PlanningProfile,
   type TrainingCapacity,
 } from '@/lib/types';
 import { Card, Field, inputClass, Notice, Section } from '@/components/ui';
@@ -146,6 +148,76 @@ export default function SetupPage() {
       </Section>
 
       <Section
+        title="Wer bekommt die freien Tage?"
+        hint="Pro Rotationszyklus gibt es nur zwei volle Tage, aber drei harte Einheiten wollen dorthin: Intervalle, Long Run und schwere Beinarbeit. Dieses Profil entscheidet — beim Planen und beim Umplanen."
+      >
+        <Card>
+          <div className="space-y-2">
+            {(['runFirst', 'strengthFirst', 'balanced'] as PlanningProfile[]).map((profile) => (
+              <label
+                key={profile}
+                className={`flex cursor-pointer items-start gap-3 rounded border p-3 transition-colors ${
+                  settings.planningProfile === profile
+                    ? 'border-ember bg-ember/5'
+                    : 'border-line hover:border-line-strong'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="profile"
+                  checked={settings.planningProfile === profile}
+                  onChange={() =>
+                    void db.settings.update('singleton', {
+                      planningProfile: profile,
+                      updatedAt: now(),
+                    })
+                  }
+                  className="mt-0.5 size-4 accent-[#e0a43c]"
+                />
+                <span className="text-sm leading-relaxed text-ink">
+                  {PLANNING_PROFILE_LABEL[profile]}
+                  <span className="mt-0.5 block text-xs text-ink-faint">
+                    {profile === 'runFirst'
+                      ? 'Laufeinheiten bekommen die freien Tage zuerst und dürfen beim Umplanen Kraft verdrängen.'
+                      : profile === 'strengthFirst'
+                        ? 'Kraft bekommt die freien Tage zuerst; Laufen läuft überwiegend locker.'
+                        : 'Wechselt von Zyklus zu Zyklus. Beim Umplanen verdrängt dann niemand jemanden.'}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+
+          <label className="mt-4 flex items-start gap-3 border-t border-line pt-4">
+            <input
+              type="checkbox"
+              checked={settings.allowStrengthOnLightDays}
+              onChange={(e) =>
+                void db.settings.update('singleton', {
+                  allowStrengthOnLightDays: e.target.checked,
+                  updatedAt: now(),
+                })
+              }
+              className="mt-1 size-4 accent-[#e0a43c]"
+            />
+            <span className="text-sm leading-relaxed text-ink">
+              Kurze Krafteinheiten an Schichttagen zulassen
+              <span className="mt-0.5 block text-xs text-ink-faint">
+                35 Minuten nach der Schicht. Ohne das erreicht die Rotation dein Kraftziel von{' '}
+                {settings.weeklyTargets.strength}×/Woche nicht — es kämen nur rund 1,5 Einheiten
+                zusammen.
+              </span>
+            </span>
+          </label>
+
+          <p className="mt-4 border-t border-line pt-3 text-xs leading-relaxed text-ink-faint">
+            Änderungen wirken auf den nächsten erzeugten Plan. Der laufende Plan bleibt, bis du ihn
+            unter Plan neu erzeugst.
+          </p>
+        </Card>
+      </Section>
+
+      <Section
         title="Umplanen"
         hint="Wie die App reagiert, wenn eine Einheit ausfällt."
       >
@@ -169,6 +241,41 @@ export default function SetupPage() {
               </span>
             </span>
           </label>
+
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <Field label="Belastungs-Zyklen" hint="Zyklen bis zum Deload.">
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={8}
+                value={settings.mesoLoadCycles}
+                onChange={(e) =>
+                  void db.settings.update('singleton', {
+                    mesoLoadCycles: Math.max(1, Math.min(8, Number(e.target.value) || 4)),
+                    updatedAt: now(),
+                  })
+                }
+                className={`${inputClass} tabular`}
+              />
+            </Field>
+            <Field label="Deload-Zyklen">
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={3}
+                value={settings.mesoDeloadCycles}
+                onChange={(e) =>
+                  void db.settings.update('singleton', {
+                    mesoDeloadCycles: Math.max(1, Math.min(3, Number(e.target.value) || 1)),
+                    updatedAt: now(),
+                  })
+                }
+                className={`${inputClass} tabular`}
+              />
+            </Field>
+          </div>
 
           <div className="mt-4">
             <Field

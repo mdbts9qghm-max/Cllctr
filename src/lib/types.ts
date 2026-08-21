@@ -12,7 +12,7 @@ export type IsoDate = string;
 export type IsoDateTime = string;
 
 /** Version des Schemas im Export. Wird bei jeder Änderung am Modell hochgezählt. */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 /* ------------------------------------------------------------------ */
 /* Schicht                                                             */
@@ -128,6 +128,7 @@ export type SessionTypeKey =
   | 'strength_upper'
   | 'strength_lower'
   | 'strength_full'
+  | 'strength_short'
   | 'mobility';
 
 /**
@@ -143,7 +144,12 @@ export interface SessionTypeMeta {
   isKey: boolean;
   /** Mindestkapazität des Tages, damit diese Session dort liegen darf. */
   minCapacity: TrainingCapacity;
-  /** Belastungsgewicht 1–10. Basis für Wochenlast und Deload-Erkennung. */
+  /**
+   * Belastungsgewicht 1–10. Basis für Wochenlast und Deload-Erkennung.
+   * Ab 7 gilt eine Session als "hart" und fällt unter die Regel, dass nicht zu
+   * viele harte Tage aufeinanderfolgen dürfen. Gemeint ist systemische und
+   * Bein-Ermüdung — reines Oberkörpertraining liegt deshalb darunter.
+   */
   load: number;
   /** Standarddauer in Minuten, wenn der Generator nichts Besseres weiß. */
   defaultDurationMin: number;
@@ -214,7 +220,11 @@ export const SESSION_TYPES: Record<SessionTypeKey, SessionTypeMeta> = {
     discipline: 'strength',
     isKey: true,
     minCapacity: 'moderate',
-    load: 7,
+    // Bewusst unter der Schwelle für "harter Tag": schweres Oberkörpertraining
+    // beeinträchtigt weder den Lauf noch die Beinarbeit am Folgetag. Läge der
+    // Wert darüber, würde die Regel gegen zwei harte Tage in Folge diese Einheit
+    // dauerhaft blockieren — die beiden freien Tage liegen ja nebeneinander.
+    load: 6,
     defaultDurationMin: 60,
     defaultZone: null,
     defaultRpe: 7,
@@ -240,6 +250,17 @@ export const SESSION_TYPES: Record<SessionTypeKey, SessionTypeMeta> = {
     defaultDurationMin: 55,
     defaultZone: null,
     defaultRpe: 7,
+  },
+  strength_short: {
+    key: 'strength_short',
+    label: 'Kraft kurz',
+    discipline: 'strength',
+    isKey: false,
+    minCapacity: 'light',
+    load: 4,
+    defaultDurationMin: 35,
+    defaultZone: null,
+    defaultRpe: 5,
   },
   mobility: {
     key: 'mobility',
@@ -282,8 +303,9 @@ export interface Mesocycle {
   name: string;
   startDate: IsoDate;
   endDate: IsoDate;
-  loadWeeks: number;
-  deloadWeeks: number;
+  /** Anzahl Belastungs-Zyklen (nicht Wochen — siehe Microcycle). */
+  loadCycles: number;
+  deloadCycles: number;
   focus: MesoFocus;
   emphasis: MesoEmphasis;
   status: CycleStatus;
@@ -298,14 +320,23 @@ export interface WeeklyTargets {
   optional: number;
 }
 
+/**
+ * Ein Mikrozyklus ist bei Cllctr **ein Durchlauf der Schichtrotation**, nicht eine
+ * Kalenderwoche. Bei einer 5-Tage-Rotation sind das fünf Tage.
+ *
+ * Grund: Nur so ist jeder Zyklus gleich aufgebaut und die Belastung schwankt nicht
+ * zufällig damit, wie die Rotation gerade in der Woche liegt. Angezeigt wird der
+ * Fortschritt trotzdem in Wochen — das rechnet die Oberfläche um.
+ */
 export interface Microcycle {
   id: string;
   mesocycleId: string;
   /** 1-basiert innerhalb des Mesozyklus. */
   index: number;
-  /** Immer ein Montag. */
   startDate: IsoDate;
   endDate: IsoDate;
+  /** Länge des Zyklus in Tagen, entspricht der Länge der Rotation. */
+  lengthDays: number;
   isDeload: boolean;
   targetSessions: WeeklyTargets;
   /** Summe der load-Werte aller geplanten Sessions. Basis für Deload-Erkennung. */
@@ -510,6 +541,19 @@ export interface Soul {
 /* Einstellungen                                                       */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Wer die knappen vollen Tage bekommt. Weil pro Rotationszyklus nur zwei Tage
+ * volle Belastung zulassen, entscheidet dieses Profil faktisch über die
+ * Volumenverteilung zwischen Laufen und Kraft.
+ */
+export type PlanningProfile = 'runFirst' | 'strengthFirst' | 'balanced';
+
+export const PLANNING_PROFILE_LABEL: Record<PlanningProfile, string> = {
+  runFirst: 'Laufen hat Vorrang',
+  strengthFirst: 'Kraft hat Vorrang',
+  balanced: 'Abwechselnd',
+};
+
 export interface HrZone {
   zone: HrZoneNumber;
   label: string;
@@ -526,6 +570,15 @@ export interface Settings {
   maxHr: number | null;
   restHr: number | null;
   weeklyTargets: WeeklyTargets;
+  planningProfile: PlanningProfile;
+  /**
+   * Erlaubt kurze Krafteinheiten (35 Min) an Schichttagen. Ohne das lässt sich
+   * ein Kraftziel von 3×/Woche mit dieser Rotation nicht erreichen.
+   */
+  allowStrengthOnLightDays: boolean;
+  /** Zyklen pro Mesozyklus: Belastung und anschließender Deload. */
+  mesoLoadCycles: number;
+  mesoDeloadCycles: number;
   /** Zwei harte Tage dürfen nicht direkt aufeinanderfolgen. */
   minHoursBetweenKeySessions: number;
   /** Wie viele Tage der Umplaner nach vorne suchen darf. */
