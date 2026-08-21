@@ -6,7 +6,6 @@ import { capacityExplanation, allowedSessionTypes, resolveShiftDay } from '@/lib
 import { useSettings, useShiftContext } from '@/lib/hooks';
 import { CAPACITY_LABEL, SESSION_TYPES } from '@/lib/types';
 import { CapacityBadge, Card, Notice, Section } from '@/components/ui';
-import { PLACEHOLDER_SEQUENCE } from '@/lib/seed';
 
 export default function HeutePage() {
   const ctx = useShiftContext();
@@ -17,9 +16,6 @@ export default function HeutePage() {
   const day = resolveShiftDay(today(), ctx);
   const possible = allowedSessionTypes(day.capacity);
 
-  const patternIsPlaceholder =
-    ctx.pattern !== null &&
-    ctx.pattern.sequence.join(',') === PLACEHOLDER_SEQUENCE.join(',');
   const zonesMissing = settings.hrZones.every((z) => z.maxBpm === 0);
 
   return (
@@ -65,14 +61,6 @@ export default function HeutePage() {
             Phase 1 steht: Datenmodell, lokale Datenbank, Schichtauflösung und Sicherung. Der
             Trainingsplan selbst kommt in Phase 2 — deshalb steht hier noch keine Session.
           </Notice>
-
-          {patternIsPlaceholder ? (
-            <Notice tone="warn">
-              Die Rotation ist noch der Platzhalter (2 Tag, 2 Nacht, Schlaftag, 2 frei). Setz sie
-              unter <Link href="/schicht" className="text-ember underline">Schicht</Link> auf deinen
-              echten Rhythmus — daran hängt die gesamte Planung.
-            </Notice>
-          ) : null}
 
           {zonesMissing ? (
             <Notice tone="warn">

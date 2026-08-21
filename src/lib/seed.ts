@@ -78,14 +78,23 @@ export const DEFAULT_SHIFT_TYPES: ShiftType[] = [
     capacity: 'light',
     trainingWindow: 'ab ca. 21:00',
     color: '#f97316',
-    note: 'Willkürlich 08:00–20:00. Wie Tagschicht zu behandeln.',
+    note: 'Willkürlich 08:00–20:00, kann kurzfristig vor einer Tagschicht liegen. Gehört deshalb nicht in die Rotation — sie wird auf dem Schicht-Screen als Abweichung für den betroffenen Tag gesetzt.',
     isBuiltIn: true,
     sortOrder: 5,
   },
 ];
 
-/** Platzhalter-Rotation: 2 Tag, 2 Nacht, Schlaftag, 2 frei. Unbedingt anpassen. */
-export const PLACEHOLDER_SEQUENCE = ['tag', 'tag', 'nacht', 'nacht', 'schlaf', 'frei', 'frei'];
+/**
+ * Die tatsächliche Rotation: Tag, Nacht, Schlaftag, frei, frei.
+ *
+ * Fünf Tage, nicht sieben — der Rhythmus läuft also quer zur Kalenderwoche und
+ * deckt sich erst nach 35 Tagen wieder mit ihr. Deshalb hat eine Woche mal zwei
+ * und mal drei volle Tage.
+ *
+ * Die V-Schicht steht bewusst nicht in dieser Folge: sie kommt kurzfristig und
+ * wird als Abweichung für den einzelnen Tag gesetzt.
+ */
+export const DEFAULT_SEQUENCE = ['tag', 'nacht', 'schlaf', 'frei', 'frei'];
 
 const DEFAULT_EXERCISES: Array<Pick<Exercise, 'name' | 'discipline' | 'metric' | 'higherIsBetter'>> = [
   { name: 'Kniebeuge', discipline: 'strength', metric: 'weight', higherIsBetter: true },
@@ -103,16 +112,16 @@ export function defaultSettings(): Settings {
   return {
     id: 'singleton',
     displayName: '',
-    // Platzhalter — unter Setup mit den eigenen, bereits berechneten Zonen überschreiben.
+    // Eigene Werte, nach Herzfrequenzreserve berechnet. Unter Setup änderbar.
     hrZones: [
-      { zone: 1, label: 'Regeneration', minBpm: 0, maxBpm: 0 },
-      { zone: 2, label: 'Grundlage', minBpm: 0, maxBpm: 0 },
-      { zone: 3, label: 'Tempo', minBpm: 0, maxBpm: 0 },
-      { zone: 4, label: 'Schwelle', minBpm: 0, maxBpm: 0 },
-      { zone: 5, label: 'Maximal', minBpm: 0, maxBpm: 0 },
+      { zone: 1, label: 'Regeneration', minBpm: 114, maxBpm: 138 },
+      { zone: 2, label: 'Grundlage', minBpm: 139, maxBpm: 160 },
+      { zone: 3, label: 'Tempo', minBpm: 161, maxBpm: 175 },
+      { zone: 4, label: 'Schwelle', minBpm: 176, maxBpm: 190 },
+      { zone: 5, label: 'Maximal', minBpm: 191, maxBpm: 205 },
     ],
-    maxHr: null,
-    restHr: null,
+    maxHr: 205,
+    restHr: 49,
     weeklyTargets: { strength: 3, run: 2, optional: 1 },
     minHoursBetweenKeySessions: 24,
     rescheduleWindowDays: 7,
@@ -130,7 +139,7 @@ function defaultPattern(): ShiftPattern {
     name: 'Meine Rotation',
     // Auf den Montag dieser Woche verankert, damit der Start nachvollziehbar ist.
     anchorDate: startOfWeek(today()),
-    sequence: [...PLACEHOLDER_SEQUENCE],
+    sequence: [...DEFAULT_SEQUENCE],
     active: true,
     createdAt: ts,
     updatedAt: ts,

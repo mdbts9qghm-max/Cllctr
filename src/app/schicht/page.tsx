@@ -122,26 +122,33 @@ export default function SchichtPage() {
               </div>
             ))}
           </div>
-          <p className="border-t border-line pt-3 text-xs text-ink-faint">
-            Tage pro Woche, gemittelt über 28 Tage. Ziel:{' '}
+          <p className="border-t border-line pt-3 text-xs leading-relaxed text-ink-faint">
+            Tage pro Woche, gemittelt über {feasibility.budget.days} Tage. Volle Tage schwanken
+            zwischen {feasibility.budget.fullDaysPerWeek.min} und{' '}
+            {feasibility.budget.fullDaysPerWeek.max} pro Woche. Ziel:{' '}
             {settings.weeklyTargets.strength}× Kraft, {settings.weeklyTargets.run}× Laufen,{' '}
             {settings.weeklyTargets.optional}× optional.
           </p>
         </Card>
 
-        {!feasibility.fits ? (
-          <div className="mt-3 space-y-2">
-            {feasibility.messages.map((m, i) => (
-              <Notice key={i} tone="warn">
-                {m}
-              </Notice>
-            ))}
-          </div>
-        ) : (
-          <div className="mt-3">
-            <Notice tone="ok">Die Wochenziele passen in deine Rotation.</Notice>
-          </div>
-        )}
+        <div className="mt-3 space-y-2">
+          <Notice
+            tone={
+              feasibility.verdict === 'fits'
+                ? 'ok'
+                : feasibility.verdict === 'tight'
+                  ? 'warn'
+                  : 'error'
+            }
+          >
+            {feasibility.headline}
+          </Notice>
+          {feasibility.messages.map((m, i) => (
+            <Notice key={i} tone="info">
+              {m}
+            </Notice>
+          ))}
+        </div>
       </Section>
 
       <Section

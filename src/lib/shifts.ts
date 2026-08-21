@@ -11,7 +11,7 @@
  *   3. Gibt es keine aktive Rotation, gilt der Tag als frei.
  */
 
-import { addDays, dateRange, daysBetween, mod } from './dates';
+import { addDays, dateRange, daysBetween, mod, startOfWeek } from './dates';
 import {
   CAPACITY_RANK,
   SESSION_TYPES,
@@ -160,48 +160,83 @@ export function capacityExplanation(day: ResolvedShiftDay): string {
 export interface CapacityBudget {
   /** Betrachteter Zeitraum in Tagen. */
   days: number;
+  /** Länge der Rotation in Tagen, null ohne aktive Rotation. */
+  cycleLength: number | null;
   /** Tage je Kapazitätsstufe, hochgerechnet auf eine Woche. */
   perWeek: Record<TrainingCapacity, number>;
+  /**
+   * Volle Tage in einer einzelnen Kalenderwoche — Minimum und Maximum.
+   * Läuft die Rotation quer zur Woche, liegen diese Werte auseinander,
+   * und genau das muss die Planung aushalten.
+   */
+  fullDaysPerWeek: { min: number; max: number };
 }
 
 /**
- * Wie viele Tage welcher Kapazität die Rotation im Schnitt pro Woche liefert.
- * Betrachtet einen längeren Zeitraum, weil Rotationen selten 7 Tage lang sind.
+ * Wie viele Tage welcher Kapazität die Rotation liefert.
+ *
+ * Betrachtet 35 Tage: das ist das kleinste gemeinsame Vielfache von einer
+ * 5-Tage-Rotation und der 7-Tage-Woche, also der Zeitraum, nach dem sich das
+ * Muster gegenüber dem Kalender wiederholt.
  */
 export function weeklyCapacityBudget(
   start: IsoDate,
   ctx: ShiftContext,
-  days = 28,
+  days = 35,
 ): CapacityBudget {
-  const resolved = resolveShiftRange(start, addDays(start, days - 1), ctx);
+  const weekStart = startOfWeek(start);
+  const weeks = Math.max(1, Math.round(days / 7));
+  const resolved = resolveShiftRange(weekStart, addDays(weekStart, weeks * 7 - 1), ctx);
+
   const counts: Record<TrainingCapacity, number> = { none: 0, light: 0, moderate: 0, full: 0 };
   for (const day of resolved) counts[day.capacity] += 1;
 
-  const weeks = days / 7;
+  // Volle Tage je Kalenderwoche einzeln zählen.
+  const fullPerWeek: number[] = [];
+  for (let w = 0; w < weeks; w++) {
+    const slice = resolved.slice(w * 7, w * 7 + 7);
+    fullPerWeek.push(slice.filter((d) => d.capacity === 'full').length);
+  }
+
   return {
-    days,
+    days: weeks * 7,
+    cycleLength: ctx.pattern && ctx.pattern.sequence.length > 0 ? ctx.pattern.sequence.length : null,
     perWeek: {
       none: counts.none / weeks,
       light: counts.light / weeks,
       moderate: counts.moderate / weeks,
       full: counts.full / weeks,
     },
+    fullDaysPerWeek: {
+      min: Math.min(...fullPerWeek),
+      max: Math.max(...fullPerWeek),
+    },
   };
 }
 
+export type FeasibilityVerdict = 'fits' | 'tight' | 'impossible';
+
 export interface FeasibilityCheck {
-  fits: boolean;
+  verdict: FeasibilityVerdict;
+  /** Kernaussage in einem Satz. */
+  headline: string;
+  /** Ergänzende Hinweise. */
   messages: string[];
   budget: CapacityBudget;
 }
 
 /**
- * Passen die Wochenziele überhaupt in die Rotation?
+ * Passen die Wochenziele in die Rotation?
  *
  * Hintergrund: Key-Sessions (Intervalle, Long Run, schwere Beinarbeit) brauchen
  * einen vollen Tag. Kraft Oberkörper und lockeres Volumen kommen mit einem
- * halben Tag aus. Wenn die Rotation davon zu wenige liefert, kann kein
- * Generator der Welt den Plan retten — dann müssen die Ziele runter.
+ * halben Tag aus. Liefert die Rotation davon zu wenige, kann kein Generator den
+ * Plan retten — dann müssen die Ziele runter.
+ *
+ * Drei Ergebnisse:
+ *   fits       — geht in jeder Woche auf
+ *   tight      — geht in guten Wochen auf, in schwachen fehlt ein Tag
+ *   impossible — geht in keiner Woche auf
  */
 export function checkFeasibility(
   start: IsoDate,
@@ -210,33 +245,51 @@ export function checkFeasibility(
 ): FeasibilityCheck {
   const budget = weeklyCapacityBudget(start, ctx);
   const messages: string[] = [];
-
-  const fullDays = budget.perWeek.full;
-  const trainableDays = fullDays + budget.perWeek.moderate + budget.perWeek.light;
+  const round = (n: number) => Math.round(n * 10) / 10;
 
   // Beide Laufeinheiten sind Key-Sessions, dazu mindestens eine schwere Beineinheit.
   const needFull = targets.run + Math.min(1, targets.strength);
-  // Kraft und Laufen brauchen mindestens einen halben Tag; nur "optional" geht auch locker.
-  const needAtLeastModerate = targets.strength + targets.run;
-  const haveAtLeastModerate = fullDays + budget.perWeek.moderate;
+  const { min, max } = budget.fullDaysPerWeek;
 
-  const round = (n: number) => Math.round(n * 10) / 10;
+  let verdict: FeasibilityVerdict;
+  let headline: string;
 
-  if (fullDays < needFull) {
+  if (min >= needFull) {
+    verdict = 'fits';
+    headline = `Passt: jede Woche bringt mindestens ${min} volle Tage, gebraucht werden ${needFull}.`;
+  } else if (max >= needFull) {
+    verdict = 'tight';
+    headline =
+      `Knapp: je nach Woche hast du ${min} oder ${max} volle Tage, gebraucht werden ${needFull}. ` +
+      `In den schwachen Wochen fehlt ein harter Tag.`;
+  } else {
+    verdict = 'impossible';
+    headline =
+      `Geht nicht auf: keine Woche bringt mehr als ${max} volle Tage, ` +
+      `für ${targets.run}× Laufen plus schwere Beinarbeit bräuchte es ${needFull}.`;
+  }
+
+  if (budget.cycleLength !== null && 7 % budget.cycleLength !== 0) {
     messages.push(
-      `Deine Rotation liefert im Schnitt ${round(fullDays)} volle Tage pro Woche, ` +
-        `für ${targets.run}× Laufen plus schwere Beinarbeit bräuchte es ${needFull}. ` +
-        `Entweder weniger harte Einheiten pro Woche — oder eine Schichtart höher einstufen.`,
+      `Deine Rotation ist ${budget.cycleLength} Tage lang, die Kalenderwoche 7. ` +
+        `Dadurch verschiebt sie sich Woche für Woche und deckt sich erst nach ` +
+        `${(budget.cycleLength * 7) / gcd(budget.cycleLength, 7)} Tagen wieder mit ihr. ` +
+        `Ein starres Wochenprogramm kann es deshalb nicht geben — die Planung muss pro Woche mitgehen.`,
     );
   }
 
+  const needAtLeastModerate = targets.strength + targets.run;
+  const haveAtLeastModerate = budget.perWeek.full + budget.perWeek.moderate;
   if (haveAtLeastModerate < needAtLeastModerate) {
     messages.push(
-      `Für ${needAtLeastModerate} feste Einheiten stehen nur ${round(haveAtLeastModerate)} Tage ` +
-        `mit normalem Volumen zur Verfügung. Der Rest müsste auf Schichttage ausweichen.`,
+      `${needAtLeastModerate} feste Einheiten treffen auf ${round(haveAtLeastModerate)} Tage mit ` +
+        `mindestens normalem Volumen. Die Differenz muss auf lockere Schichttage ausweichen — ` +
+        `das geht nur mit Recovery-Läufen und Mobility.`,
     );
   }
 
+  const trainableDays =
+    budget.perWeek.full + budget.perWeek.moderate + budget.perWeek.light;
   const totalTargets = targets.strength + targets.run + targets.optional;
   if (trainableDays < totalTargets) {
     messages.push(
@@ -244,5 +297,10 @@ export function checkFeasibility(
     );
   }
 
-  return { fits: messages.length === 0, messages, budget };
+  return { verdict, headline, messages, budget };
+}
+
+/** Größter gemeinsamer Teiler — für die Angabe, wann Rotation und Woche wieder zusammenfallen. */
+function gcd(a: number, b: number): number {
+  return b === 0 ? a : gcd(b, a % b);
 }

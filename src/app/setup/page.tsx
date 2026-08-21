@@ -43,6 +43,37 @@ export default function SetupPage() {
         ) : null}
 
         <Card>
+          <div className="mb-4 grid grid-cols-2 gap-3 border-b border-line pb-4">
+            <Field label="Ruhe-HF">
+              <input
+                type="number"
+                inputMode="numeric"
+                value={settings.restHr ?? ''}
+                onChange={(e) =>
+                  void db.settings.update('singleton', {
+                    restHr: Number(e.target.value) || null,
+                    updatedAt: now(),
+                  })
+                }
+                className={`${inputClass} tabular`}
+              />
+            </Field>
+            <Field label="Maximale HF">
+              <input
+                type="number"
+                inputMode="numeric"
+                value={settings.maxHr ?? ''}
+                onChange={(e) =>
+                  void db.settings.update('singleton', {
+                    maxHr: Number(e.target.value) || null,
+                    updatedAt: now(),
+                  })
+                }
+                className={`${inputClass} tabular`}
+              />
+            </Field>
+          </div>
+
           <div className="space-y-3">
             {settings.hrZones.map((z) => (
               <div key={z.zone} className="flex items-center gap-2">
