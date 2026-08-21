@@ -1,0 +1,57 @@
+@import 'tailwindcss';
+
+/*
+ * Cllctr — dunkel, reduziert, ernst.
+ * Eine einzige Akzentfarbe (Bernstein), sonst nur Graustufen.
+ * Die Metapher ist ein Artefakt-Inventar, kein Belohnungsheft.
+ */
+@theme {
+  --color-void: #0a0a0b;
+  --color-surface: #131316;
+  --color-surface-2: #1c1c21;
+  --color-line: #2a2a31;
+  --color-line-strong: #3d3d47;
+
+  --color-ink: #f4f4f5;
+  --color-ink-muted: #a1a1aa;
+  --color-ink-faint: #6b6b76;
+
+  --color-ember: #e0a43c;
+  --color-ember-dim: #8a6423;
+
+  --color-danger: #d4544a;
+  --color-ok: #4ea373;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+}
+
+html {
+  color-scheme: dark;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background-color: var(--color-void);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  /* Safe-Area fuer den iPhone-Homescreen-Modus. */
+  padding-bottom: env(safe-area-inset-bottom);
+  overscroll-behavior-y: none;
+}
+
+/* Zahlen sollen in Tabellen und Zaehlern nicht springen. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+::selection {
+  background: var(--color-ember-dim);
+  color: var(--color-ink);
+}
+
+/* Sichtbarer Fokus, auch mit dunklem Hintergrund. */
+:focus-visible {
+  outline: 2px solid var(--color-ember);
+  outline-offset: 2px;
+}
