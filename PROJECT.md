@@ -29,7 +29,7 @@ Diese Entscheidungen prägen das gesamte Datenmodell. Ändern sie sich, ändert 
 | Schichtart | Zeit | Kapazität | Begründung |
 |---|---|---|---|
 | Tagschicht | 07:00–19:00 | `light` | 12 h Arbeit, danach höchstens kurz und locker |
-| Nachtschicht | 19:00–07:00 | `light` | Vormittags Zeit, aber nichts, was den Schlaf davor frisst |
+| Nachtschicht | 19:00–07:00 | `moderate` | Der Vormittag vor der Schicht ist frei: normales Volumen inklusive Kraft |
 | Schlaftag | Schlaf 08:00–14:00 | `moderate` | Ab ca. 15:00 normales Volumen, keine Key-Session |
 | Freischicht | ganzer Tag | `full` | Hier liegen die harten Einheiten |
 | V-Schicht | 08:00–20:00 | `light` | Kommt kurzfristig vor einer Tagschicht — **nicht** Teil der Rotation, wird als Abweichung gesetzt |
@@ -81,9 +81,14 @@ Ein starres Wochenprogramm kann es deshalb nicht geben. Und weil pro 5-Tage-Zykl
 | Stufe | Bedeutung | Erlaubte Session-Typen |
 |---|---|---|
 | `none` | Kein Training | — |
-| `light` | Kurz und locker, ≤ 45 min | Recovery Run, Mobility |
-| `moderate` | Normales Volumen, keine Key-Session | + Lockerer Lauf, Kraft Oberkörper, Kraft Ganzkörper |
-| `full` | Alles möglich | + Intervalle, Tempolauf, Long Run, Kraft Unterkörper |
+| `light` | Kurz und locker, ≤ 45 min | Recovery Run, Kraft kurz, Mobility |
+| `moderate` | Halber Tag frei | + Lockerer Lauf, Kraft Ober- und Unterkörper, Ganzkörper |
+| `full` | Ganzer Tag frei | + Intervalle, Tempolauf, Long Run |
+
+Krafttraining braucht keinen ganzen Tag: schwere Beinarbeit passt an den Schlaftag ab 15:00
+ebenso wie an den Vormittag vor der Nachtschicht. Nur die harten Laufeinheiten brauchen
+wirklich einen freien Tag. Das entzerrt den Plan deutlich — Doppeltage fielen dadurch von
+fünf auf einen pro Planungszeitraum.
 
 ---
 
@@ -156,7 +161,7 @@ deshalb bereits in Phase 1 gebaut, nicht am Ende.
 | 1 | Setup, Datenmodell, IndexedDB, Schichtauflösung, Export/Import | **fertig** |
 | 2 | Trainingsplanung: Generator + adaptives Umplanen | **fertig** |
 | 3 | Heute-Screen | **fertig** |
-| 4 | Tasks | offen |
+| 4 | Tasks | **fertig** |
 | 5 | Statistiken (`recharts`) | offen |
 | 6 | Soul Collector Layer | offen |
 | 7 | PWA, Polish, Deployment | offen |
@@ -184,8 +189,9 @@ Mit der echten Rotation und den Zielen 3× Kraft, 2× Laufen, 1× optional:
 | Lockere Tage (Tag-/Nachtschicht) | 2,8 |
 | Urteil | **knapp** — in schwachen Wochen fehlt ein harter Tag |
 
-Der Generator löst das über mehrere Zyklen hinweg. Tatsächlich erzeugtes Volumen:
-**3,0× Kraft und 3,0× Laufen pro Woche** — beide Ziele erreicht.
+Seit Krafttraining auch an halben Tagen möglich ist, lautet das Urteil **passt**: Jede Woche
+bringt mindestens 2 volle Tage, gebraucht werden 2 für die harten Laufeinheiten. Tatsächlich
+erzeugtes Volumen: **3,0× Kraft und 3,0× Laufen pro Woche**.
 
 ---
 
@@ -340,6 +346,60 @@ Umweg über den Plan.
 Ende-zu-Ende gegen den statischen Export: Plan erzeugen, Begründung prüfen, abhaken,
 Protokoll speichern und in IndexedDB nachweisen, verpassen, Vorschlag übernehmen,
 Ruhetag-Ansicht. Keine Konsolenfehler.
+
+---
+
+## Phase 4 — Aufgaben und Termine
+
+### Haushalt und Termine sind nicht dasselbe
+
+`TaskKind` unterscheidet beides, und der Unterschied ist nicht kosmetisch:
+
+- **Termin** — liegt fest, hat eine Uhrzeit, wird **immer** angezeigt, egal wie der Tag
+  aussieht. Ein Zahnarzttermin verhandelt nicht mit dem Trainingsplan.
+- **Haushalt** — verschiebbar, hat einen Energiebedarf, wird nur vorgeschlagen, wenn der
+  Tag ihn trägt.
+
+### Das Energiebudget des Tages (`tasks.ts`)
+
+Der Punkt, an dem sich Cllctr von einer normalen To-do-App unterscheidet. Grundlage ist
+dieselbe Kapazitätsskala wie beim Training, weil sie dasselbe misst: **wie viel von diesem
+Tag dir gehört.**
+
+| Schicht | Erlaubt |
+|---|---|
+| Freischicht | leicht, fokussiert, anstrengend |
+| Schlaftag, Nachtschicht | leicht, fokussiert |
+| Tag-, V-Schicht | nur leicht |
+
+Danach zieht das Training ab: Ab einer Tageslast von 8 — eine harte Laufeinheit oder
+schwere Beinarbeit — fällt die oberste Stufe weg. Diese Schwelle liegt bewusst **niedriger**
+als die Härte-Regel des Planers: Für die Trainingsplanung ist Krafttraining kein harter
+Tag, für den Haushalt danach sehr wohl. Wer 65 Minuten Kniebeugen hinter sich hat, fängt
+keinen Großputz mehr an.
+
+Aufgaben, die der Tag nicht hergibt, tauchen gar nicht erst auf. Sie als „heute vielleicht"
+anzuzeigen wäre genau das Nachdenken, das die App abnehmen soll — stattdessen steht darunter
+eine Zeile, wie viele auf einen Tag mit mehr Luft warten.
+
+Sortierung der Vorschläge: überfällig vor fällig vor irgendwann, dann Priorität, dann die
+kleinere Aufgabe zuerst — sie ist eher erledigt.
+
+### Wiederholungen
+
+Beim Abhaken entsteht sofort die nächste Instanz, verknüpft über `templateTaskId`. Die
+erledigte bleibt als Verlauf stehen, sonst wäre nach einem Jahr nicht nachvollziehbar, wie
+oft etwas tatsächlich gemacht wurde. Monatliche Termine werden auf den Monatsletzten
+begrenzt, damit der 31. Januar nicht in den 3. März rutscht.
+
+### Geprüft
+
+- Wiederholungslogik: täglich, mehrtägig, wöchentlich mit Wochentag, monatlich,
+  Monatsende (31.01. → 28.02., im Schaltjahr → 29.02.), Jahreswechsel
+- Energiebudget über alle Schichtarten, mit und ohne Training
+- Vorschläge: Überfälliges zuerst, Termine getrennt, nicht fällige ausgeschlossen
+- Ende-zu-Ende: anlegen, abhaken, Folgeinstanz in IndexedDB nachgewiesen, neuer Termin
+  erscheint nicht sofort wieder als Vorschlag
 
 ---
 

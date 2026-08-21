@@ -247,8 +247,9 @@ export function checkFeasibility(
   const messages: string[] = [];
   const round = (n: number) => Math.round(n * 10) / 10;
 
-  // Beide Laufeinheiten sind Key-Sessions, dazu mindestens eine schwere Beineinheit.
-  const needFull = targets.run + Math.min(1, targets.strength);
+  // Nur die harten Laufeinheiten brauchen einen ganzen Tag. Krafttraining kommt
+  // mit einem halben aus — Schlaftag oder der Vormittag vor der Nachtschicht.
+  const needFull = targets.run;
   const { min, max } = budget.fullDaysPerWeek;
 
   let verdict: FeasibilityVerdict;
@@ -261,12 +262,12 @@ export function checkFeasibility(
     verdict = 'tight';
     headline =
       `Knapp: je nach Woche hast du ${min} oder ${max} volle Tage, gebraucht werden ${needFull}. ` +
-      `In den schwachen Wochen fehlt ein harter Tag.`;
+      `In den schwachen Wochen fehlt ein Tag für eine harte Laufeinheit.`;
   } else {
     verdict = 'impossible';
     headline =
       `Geht nicht auf: keine Woche bringt mehr als ${max} volle Tage, ` +
-      `für ${targets.run}× Laufen plus schwere Beinarbeit bräuchte es ${needFull}.`;
+      `für ${targets.run}× harte Laufeinheiten bräuchte es ${needFull}.`;
   }
 
   if (budget.cycleLength !== null && 7 % budget.cycleLength !== 0) {

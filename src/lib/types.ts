@@ -12,7 +12,7 @@ export type IsoDate = string;
 export type IsoDateTime = string;
 
 /** Version des Schemas im Export. Wird bei jeder Änderung am Modell hochgezählt. */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /* ------------------------------------------------------------------ */
 /* Schicht                                                             */
@@ -247,7 +247,10 @@ export const SESSION_TYPES: Record<SessionTypeKey, SessionTypeMeta> = {
     label: 'Kraft Unterkörper',
     discipline: 'strength',
     isKey: true,
-    minCapacity: 'full',
+    // Ein halber Tag reicht: schwere Beinarbeit passt an den Schlaftag ab 15:00
+    // ebenso wie an den Vormittag vor der Nachtschicht. Nur die harten
+    // Laufeinheiten brauchen wirklich einen ganzen Tag.
+    minCapacity: 'moderate',
     countsAsHardDay: false,
     load: 9,
     defaultDurationMin: 65,
@@ -492,7 +495,29 @@ export const TASK_ENERGY_LABEL: Record<TaskEnergy, string> = {
   hard: 'Anstrengend',
 };
 
+/** 1 ist am wichtigsten. */
 export type TaskPriority = 1 | 2 | 3;
+
+export const TASK_PRIORITY_LABEL: Record<TaskPriority, string> = {
+  1: 'Hoch',
+  2: 'Mittel',
+  3: 'Niedrig',
+};
+
+/**
+ * Haushalt oder Termin.
+ *
+ * Der Unterschied ist nicht kosmetisch: Ein Termin liegt fest und wird immer
+ * angezeigt, egal wie der Tag aussieht. Eine Haushaltsaufgabe ist verschiebbar
+ * und wird deshalb nur vorgeschlagen, wenn die Energie des Tages dazu passt.
+ */
+export type TaskKind = 'chore' | 'appointment';
+
+export const TASK_KIND_LABEL: Record<TaskKind, string> = {
+  chore: 'Haushalt',
+  appointment: 'Termin',
+};
+
 export type TaskStatus = 'open' | 'done' | 'archived';
 export type RecurrenceKind = 'daily' | 'weekly' | 'monthly';
 
@@ -508,9 +533,12 @@ export interface Recurrence {
 
 export interface Task {
   id: string;
+  kind: TaskKind;
   title: string;
   notes: string;
   dueDate: IsoDate | null;
+  /** Uhrzeit "HH:MM", nur bei Terminen. */
+  time: string | null;
   priority: TaskPriority;
   energy: TaskEnergy;
   status: TaskStatus;

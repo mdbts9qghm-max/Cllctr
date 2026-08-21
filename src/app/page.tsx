@@ -9,8 +9,10 @@ import { useSettings, useShiftContext } from '@/lib/hooks';
 import { capacityExplanation, resolveShiftDay, resolveShiftRange } from '@/lib/shifts';
 import { blockStatus, explainRestDay, explainSession } from '@/lib/explain';
 import { applyRescheduleProposal, buildRescheduleProposal, markSessionMissed } from '@/lib/plan-store';
+import { appointmentsOn, suggestTasks, taskEnergyBudget, tasksBlockedByEnergy } from '@/lib/tasks';
+import { completeTask } from '@/lib/task-store';
 import type { ReschedulePlan } from '@/lib/replan';
-import { CAPACITY_LABEL, type Session } from '@/lib/types';
+import { CAPACITY_LABEL, TASK_ENERGY_LABEL, type Session, type Task } from '@/lib/types';
 import { Button, CapacityBadge, Card, Notice, Section } from '@/components/ui';
 import { SessionCard } from '@/components/SessionCard';
 
@@ -32,7 +34,8 @@ export default function HeutePage() {
       .toArray();
     const micros = await db.microcycles.toArray();
     const hasPlan = (await db.macrocycles.count()) > 0;
-    return { sessions, micros, hasPlan };
+    const tasks = await db.tasks.where('status').equals('open').toArray();
+    return { sessions, micros, hasPlan, tasks };
   }, [todayIso]);
 
   if (!ctx || !settings || !data) return <p className="text-sm text-ink-faint">Lade …</p>;
@@ -77,6 +80,11 @@ export default function HeutePage() {
     nextSession ? { session: nextSession, date: nextSession.date } : null,
     cancelledToday,
   );
+
+  const budget = taskEnergyBudget(day, todaySessions);
+  const todayAppointments: Task[] = appointmentsOn(data.tasks, todayIso);
+  const suggested = suggestTasks(data.tasks, budget, todayIso);
+  const blocked = tasksBlockedByEnergy(data.tasks, budget, todayIso);
 
   const status =
     micro && settings
@@ -208,12 +216,72 @@ export default function HeutePage() {
         ) : null}
       </section>
 
-      {/* 2 — Tasks, kommt in Phase 4 */}
-      <Section title="Heute sinnvoll">
-        <Notice tone="info">
-          Aufgaben kommen in Phase 4. Sie werden zur Tagesbelastung passen: an harten Tagen keine
-          anstrengenden Fokus-Aufgaben, an Ruhetagen schon.
-        </Notice>
+      {/* 2 — Aufgaben, passend zur Energie des Tages */}
+      <Section title="Heute sinnvoll" hint={budget.reason}>
+        {todayAppointments.length > 0 ? (
+          <div className="mb-3 space-y-1.5">
+            {todayAppointments.map((task) => (
+              <div
+                key={task.id}
+                className="flex items-center gap-3 rounded border border-ember-dim bg-ember/5 px-3 py-2.5"
+              >
+                <span className="w-12 shrink-0 text-xs text-ember tabular">
+                  {task.time ?? 'Termin'}
+                </span>
+                <span className="flex-1 truncate text-sm text-ink">{task.title}</span>
+                <button
+                  onClick={() => void completeTask(task)}
+                  aria-label="Abhaken"
+                  className="size-5 shrink-0 rounded border border-line-strong hover:border-ember"
+                />
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {suggested.length > 0 ? (
+          <div className="space-y-1.5">
+            {suggested.map((task) => (
+              <div
+                key={task.id}
+                className="flex items-center gap-3 rounded border border-line bg-surface px-3 py-2.5"
+              >
+                <button
+                  onClick={() => void completeTask(task)}
+                  aria-label="Abhaken"
+                  className="size-5 shrink-0 rounded border border-line-strong transition-colors hover:border-ember"
+                />
+                <span className="flex-1 truncate text-sm text-ink">{task.title}</span>
+                <span className="shrink-0 text-[11px] text-ink-faint">
+                  {TASK_ENERGY_LABEL[task.energy]}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : data.tasks.length === 0 ? (
+          <Notice tone="info">
+            Noch keine Aufgaben.{' '}
+            <Link href="/aufgaben" className="text-ember underline">
+              Anlegen
+            </Link>{' '}
+            — die App schlägt dann nur vor, was zum Tag passt.
+          </Notice>
+        ) : (
+          <Notice tone="info">
+            Nichts, was heute sinnvoll wäre. Alles Offene braucht mehr Energie, als der Tag hergibt.
+          </Notice>
+        )}
+
+        {blocked.length > 0 ? (
+          <p className="mt-2 text-xs leading-relaxed text-ink-faint">
+            {blocked.length === 1
+              ? `${blocked.length} Aufgabe wartet auf einen Tag mit mehr Luft.`
+              : `${blocked.length} Aufgaben warten auf einen Tag mit mehr Luft.`}{' '}
+            <Link href="/aufgaben" className="underline">
+              Alle ansehen
+            </Link>
+          </p>
+        ) : null}
       </Section>
 
       {/* 3 — Wo stehe ich im Block */}
