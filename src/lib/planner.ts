@@ -169,9 +169,15 @@ function buildContent(
   }
 }
 
-function sessionTitle(type: SessionTypeKey, isDeload: boolean): string {
-  const base = SESSION_TYPES[type].label;
-  return isDeload ? `${base} (Deload)` : base;
+/**
+ * Titel ohne Deload-Zusatz.
+ *
+ * Der Zyklus ist im Plan ohnehin als Deload beschriftet und die Begründung auf
+ * dem Heute-Screen sagt es ebenfalls. Im Titel würde der Zusatz nur die Zeile
+ * sprengen und in der Liste abgeschnitten werden.
+ */
+function sessionTitle(type: SessionTypeKey): string {
+  return SESSION_TYPES[type].label;
 }
 
 /* ------------------------------------------------------------------ */
@@ -700,7 +706,7 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
             orderInDay: orderIndex + 1,
             discipline: meta.discipline,
             type,
-            title: sessionTitle(type, isDeload),
+            title: sessionTitle(type),
             plannedDurationMin: plan.durationMin,
             plannedDistanceKm: null,
             zone: meta.defaultZone,

@@ -11,6 +11,7 @@ import {
   type PlanningProfile,
   type TrainingCapacity,
 } from '@/lib/types';
+import Link from 'next/link';
 import { Card, Field, inputClass, Notice, Section } from '@/components/ui';
 
 const CAPACITIES: TrainingCapacity[] = ['none', 'light', 'moderate', 'full'];
@@ -31,6 +32,61 @@ export default function SetupPage() {
 
   return (
     <>
+      <Section title="Bereiche">
+        <div className="space-y-2">
+          <Link
+            href="/schicht"
+            className="flex items-center gap-3 rounded border border-line bg-surface px-4 py-3 transition-colors hover:border-line-strong"
+          >
+            <span className="flex-1">
+              <span className="block text-sm text-ink">Schicht und Rotation</span>
+              <span className="block text-xs text-ink-faint">
+                Grundrhythmus, Abweichungen, Machbarkeit
+              </span>
+            </span>
+            <span className="text-ink-faint">›</span>
+          </Link>
+          <Link
+            href="/daten"
+            className="flex items-center gap-3 rounded border border-line bg-surface px-4 py-3 transition-colors hover:border-line-strong"
+          >
+            <span className="flex-1">
+              <span className="block text-sm text-ink">Daten und Sicherung</span>
+              <span className="block text-xs text-ink-faint">
+                Export, Wiederherstellen, Zurücksetzen
+              </span>
+            </span>
+            <span className="text-ink-faint">›</span>
+          </Link>
+        </div>
+      </Section>
+
+      <Section
+        title="Auf den Homescreen"
+        hint="Erst dort läuft Cllctr ohne Browser-Leisten und auch ohne Empfang."
+      >
+        <Card>
+          <ol className="space-y-1.5 text-sm leading-relaxed text-ink-muted">
+            <li>
+              <span className="text-ink-faint">1.</span> In Safari öffnen — in anderen Browsern
+              bietet iOS die Funktion nicht an.
+            </li>
+            <li>
+              <span className="text-ink-faint">2.</span> Teilen-Symbol antippen, dann{' '}
+              <span className="text-ink">Zum Home-Bildschirm</span>.
+            </li>
+            <li>
+              <span className="text-ink-faint">3.</span> Ab jetzt startet Cllctr wie eine normale
+              App.
+            </li>
+          </ol>
+          <p className="mt-3 border-t border-line pt-3 text-xs leading-relaxed text-ink-faint">
+            Die Daten liegen weiterhin nur in diesem Browser. Lösche seine Website-Daten, sind sie
+            weg — deshalb regelmäßig unter Daten exportieren.
+          </p>
+        </Card>
+      </Section>
+
       <Section
         title="Herzfrequenz-Zonen"
         hint="Deine eigenen Werte. Die App rechnet nichts aus — sie übernimmt, was hier steht, und schreibt es in die geplanten Laufeinheiten."

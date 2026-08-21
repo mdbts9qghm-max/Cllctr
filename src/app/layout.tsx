@@ -5,6 +5,25 @@ import { AppShell } from '@/components/AppShell';
 export const metadata: Metadata = {
   title: 'Cllctr',
   description: 'Trainingsplanung, Alltag und Fortschritt — lokal auf deinem Gerät.',
+  manifest: '/manifest.json',
+  applicationName: 'Cllctr',
+  // Damit die App vom Homescreen ohne Safari-Leisten startet und die
+  // Statusleiste zum dunklen Hintergrund passt.
+  appleWebApp: {
+    capable: true,
+    title: 'Cllctr',
+    statusBarStyle: 'black-translucent',
+  },
+  icons: {
+    icon: '/icon-192.png',
+    apple: '/apple-touch-icon.png',
+  },
+  formatDetection: { telephone: false },
+  other: {
+    // Next setzt nur das moderne `mobile-web-app-capable`. Ältere iOS-Versionen
+    // starten ohne die apple-Variante weiterhin mit Safari-Leisten.
+    'apple-mobile-web-app-capable': 'yes',
+  },
 };
 
 export const viewport: Viewport = {

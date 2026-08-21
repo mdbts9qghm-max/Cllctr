@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { db } from '@/lib/db';
-import { addDays, formatShort, today } from '@/lib/dates';
+import { addDays, formatShort, today, weekdayShort } from '@/lib/dates';
 import { now } from '@/lib/ids';
 import { capacityExplanation, checkFeasibility, resolveShiftRange } from '@/lib/shifts';
 import { useSettings, useShiftContext } from '@/lib/hooks';
@@ -170,13 +170,22 @@ export default function SchichtPage() {
                   >
                     {day.shiftType.short}
                   </span>
-                  <span className="w-24 shrink-0 text-sm text-ink tabular">
-                    {formatShort(day.date)}
+                  {/* Kompaktes Datum: der Schichtname braucht den Platz mehr. */}
+                  <span className="w-[68px] shrink-0 text-sm text-ink tabular">
+                    {weekdayShort(day.date)} {day.date.slice(8)}.{day.date.slice(5, 7)}.
                   </span>
-                  <span className="flex-1 truncate text-sm text-ink-muted">
-                    {day.shiftType.name}
-                    {day.isOverride ? ' ∗' : ''}
-                    {day.afterNightShift ? ' · nach Nacht' : ''}
+                  {/* "nach Nacht" in eine eigene Zeile statt hinter den Namen:
+                      nebeneinander wird beides abgeschnitten. */}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm text-ink-muted">
+                      {day.shiftType.name}
+                      {day.isOverride ? ' ∗' : ''}
+                    </span>
+                    {day.afterNightShift ? (
+                      <span className="block text-[10px] leading-tight text-ink-faint">
+                        nach Nacht
+                      </span>
+                    ) : null}
                   </span>
                   <CapacityBadge capacity={day.capacity} label={CAPACITY_SHORT[day.capacity]} />
                 </button>

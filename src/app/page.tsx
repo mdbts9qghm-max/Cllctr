@@ -109,14 +109,17 @@ export default function HeutePage() {
           <CapacityBadge capacity={day.capacity} label={CAPACITY_LABEL[day.capacity]} />
         </div>
 
-        <div className="mb-3 flex items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3">
+        <Link
+          href="/schicht"
+          className="mb-3 flex items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3 transition-colors hover:border-line-strong"
+        >
           <span
             className="flex size-8 shrink-0 items-center justify-center rounded text-sm font-bold text-void"
             style={{ backgroundColor: day.shiftType.color }}
           >
             {day.shiftType.short}
           </span>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <p className="truncate font-medium text-ink">{day.shiftType.name}</p>
             <p className="truncate text-xs text-ink-faint tabular">
               {day.shiftType.startTime && day.shiftType.endTime
@@ -125,7 +128,8 @@ export default function HeutePage() {
               {day.shiftType.trainingWindow ? ` · Training ${day.shiftType.trainingWindow}` : ''}
             </p>
           </div>
-        </div>
+          <span className="shrink-0 text-ink-faint">›</span>
+        </Link>
 
         {message ? (
           <div className="mb-3">

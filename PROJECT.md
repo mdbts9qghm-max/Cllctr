@@ -164,7 +164,7 @@ deshalb bereits in Phase 1 gebaut, nicht am Ende.
 | 4 | Tasks | **fertig** |
 | 5 | Statistiken (`recharts`) | **fertig** |
 | 6 | Soul Collector Layer | **fertig** |
-| 7 | PWA, Polish, Deployment | offen |
+| 7 | PWA, Polish, Deployment | **fertig** |
 
 ### Phase 1 — geliefert
 
@@ -565,6 +565,64 @@ darf beobachtet werden.
 - Keine doppelten Schlüssel im Katalog
 - Ende-zu-Ende: leerer Vault, erste Seele nach dem Abhaken, Fortschritt auf dem
   Heute-Screen, Persistenz in IndexedDB, und mehrfaches Auswerten legt nichts doppelt an
+
+---
+
+## Phase 7 — PWA, Politur, Deployment
+
+### Auf dem Homescreen
+
+`public/manifest.json` mit `display: standalone`, dunklem Hintergrund und drei Icons
+(192, 512, maskierbar 512). Dazu die apple-spezifischen Metadaten: Next setzt nur das
+moderne `mobile-web-app-capable`, ältere iOS-Versionen starten ohne die apple-Variante
+weiterhin mit Safari-Leisten — beide sind gesetzt.
+
+Das Zeichen ist eine Raute in der Raute: dieselbe Geometrie wie die Seltenheitsmarken
+`◇ ◈ ◆` im Vault. Ein erster Entwurf mit einem Seelen-Glyph las sich bei 32 px als
+Glühbirne und wurde verworfen.
+
+### Offline
+
+`public/sw.js` — kein Framework, rund 90 Zeilen:
+
+| Anfrage | Strategie |
+|---|---|
+| Seitenaufruf | erst Netz (damit neue Versionen ankommen), sonst Cache, sonst Startseite |
+| `/_next/static/*` | Cache zuerst — die Dateien tragen einen Hash und ändern sich nie |
+| alles Übrige | aus dem Cache antworten, im Hintergrund erneuern |
+
+Beim Anheben von `VERSION` verwirft der Worker alte Caches. Die Kernseiten werden
+einzeln vorgeladen statt per `addAll` — ein fehlender Eintrag darf die Installation nicht
+scheitern lassen.
+
+Ziel ist nicht Geschwindigkeit, sondern Verfügbarkeit: Die Daten liegen ohnehin lokal;
+fehlt nur die Hülle, ist alles unerreichbar.
+
+### Navigation neu
+
+Acht Einträge in einer Zeile waren auf 390 px nicht mehr lesbar. Jetzt eine feste
+Leiste am unteren Rand mit den fünf Screens des Alltags (Heute, Plan, Aufgaben,
+Statistik, Seelen), jeweils mit eigenem Symbol. Schicht, Setup und Daten hängen hinter
+dem Zahnrad oben rechts; die Schichtkarte auf dem Heute-Screen führt zusätzlich direkt
+dorthin. Die Leiste respektiert `env(safe-area-inset-bottom)`, damit sie über der
+Home-Anzeige des iPhones liegt.
+
+### Ein Fehler, der nur im Export auftrat
+
+`usePathname()` liefert beim Vorrendern `/plan`, beim Aufruf der exportierten Datei aber
+`/plan.html`. Der aktive Reiter unterschied sich dadurch zwischen Server- und
+Client-Rendering, und React brach die Hydration mit einer Client-Exception ab — sichtbar
+nur im Produktionsbuild, nie im Entwicklungsmodus. Der Pfad wird jetzt vor dem Vergleich
+angeglichen.
+
+### Geprüft
+
+- Manifest, Icons und alle iOS-Metadaten im gebauten HTML
+- Service Worker registriert sich und wird aktiv
+- **Echtes Offline**: Netz abgeschaltet, neu geladen — App startet, Trainingsplan da
+- Alle acht Screens auf waagerechtes Scrollen und abgeschnittenen Text geprüft
+- Die untere Leiste verdeckt keinen Inhalt
+- Keine Konsolenfehler auf irgendeinem Screen
 
 ---
 
