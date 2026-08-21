@@ -5,7 +5,8 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 import { getSessionLog, logSession, type QuickLog } from '@/lib/plan-store';
 import { formatRecordValue, PR_KIND_LABEL, recordSets, type SetInput } from '@/lib/pr';
-import type { Exercise, Session, SessionFeeling } from '@/lib/types';
+import { syncSouls } from '@/lib/soul-store';
+import type { Exercise, Session, SessionFeeling, Soul } from '@/lib/types';
 import { Button, inputClass } from './ui';
 
 const FEELINGS: Array<{ key: SessionFeeling; label: string }> = [
@@ -34,7 +35,7 @@ export function SessionLogForm({
   onCancel,
 }: {
   session: Session;
-  onSaved: (newRecords: string[]) => void;
+  onSaved: (newRecords: string[], newSouls: Soul[]) => void;
   onCancel: () => void;
 }) {
   const [rpe, setRpe] = useState<number | null>(session.targetRpe);
@@ -99,7 +100,10 @@ export function SessionLogForm({
       );
     }
 
-    onSaved(lines);
+    // Erst nach dem Schreiben auswerten — sonst sieht die Prüfung die neue
+    // Einheit noch nicht.
+    const souls = await syncSouls();
+    onSaved(lines, souls);
   }
 
   return (
@@ -252,19 +256,42 @@ export function SessionLogForm({
   );
 }
 
-/** Meldung über neu erkannte Bestwerte. */
-export function NewRecordsNotice({ records }: { records: string[] }) {
-  if (records.length === 0) return null;
+/** Meldung über neu erkannte Bestwerte und eingesammelte Seelen. */
+export function NewRecordsNotice({ records, souls = [] }: { records: string[]; souls?: Soul[] }) {
+  if (records.length === 0 && souls.length === 0) return null;
   return (
-    <div className="mb-3 rounded border border-ember bg-ember/10 p-3">
-      <p className="mb-1 text-[11px] uppercase tracking-widest text-ember">
-        {records.length === 1 ? 'Neuer Bestwert' : 'Neue Bestwerte'}
-      </p>
-      {records.map((line, i) => (
-        <p key={i} className="text-sm text-ink">
-          {line}
-        </p>
-      ))}
+    <div className="mb-3 space-y-3">
+      {records.length > 0 ? (
+        <div className="rounded border border-ember bg-ember/10 p-3">
+          <p className="mb-1 text-[11px] uppercase tracking-widest text-ember">
+            {records.length === 1 ? 'Neuer Bestwert' : 'Neue Bestwerte'}
+          </p>
+          {records.map((line, i) => (
+            <p key={i} className="text-sm text-ink">
+              {line}
+            </p>
+          ))}
+        </div>
+      ) : null}
+
+      {souls.length > 0 ? (
+        <div className="rounded border border-ember bg-ember/10 p-3">
+          <p className="mb-2 text-[11px] uppercase tracking-widest text-ember">
+            {souls.length === 1 ? 'Seele eingesammelt' : `${souls.length} Seelen eingesammelt`}
+          </p>
+          {souls.map((soul) => (
+            <div key={soul.id} className="mb-2 last:mb-0">
+              <p className="text-sm font-medium text-ink">
+                <span className="text-ember">
+                  {soul.rarity === 'legendary' ? '◆' : soul.rarity === 'rare' ? '◈' : '◇'}
+                </span>{' '}
+                {soul.name}
+              </p>
+              <p className="text-xs leading-relaxed text-ink-muted">{soul.description}</p>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

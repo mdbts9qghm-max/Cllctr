@@ -4,12 +4,14 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { seedIfEmpty } from '@/lib/seed';
+import { syncSouls } from '@/lib/soul-store';
 
 const NAV = [
   { href: '/', label: 'Heute' },
   { href: '/plan', label: 'Plan' },
   { href: '/aufgaben', label: 'Aufgaben' },
   { href: '/statistik', label: 'Statistik' },
+  { href: '/seelen', label: 'Seelen' },
   { href: '/schicht', label: 'Schicht' },
   { href: '/setup', label: 'Setup' },
   { href: '/daten', label: 'Daten' },
@@ -27,6 +29,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     seedIfEmpty()
       .then(() => setReady(true))
+      // Seelen können auch ohne Zutun fällig werden — etwa wenn ein Zyklus zu
+      // Ende ging, während die App zu war. Einmal pro Start nachrechnen.
+      .then(() => syncSouls())
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
 
@@ -36,7 +41,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <Link href="/" className="text-lg font-semibold tracking-[0.2em] text-ink">
           CLLCTR
         </Link>
-        <span className="text-[11px] uppercase tracking-widest text-ink-faint">Phase 5</span>
+        <span className="text-[11px] uppercase tracking-widest text-ink-faint">Phase 6</span>
       </header>
 
       {/* Sechs Einträge passen nicht nebeneinander auf ein Telefon — deshalb

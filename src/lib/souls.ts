@@ -1,0 +1,474 @@
+/**
+ * Soul Collector.
+ *
+ * Jeder erreichte Meilenstein ist eine Seele, die eingesammelt wird. Das ist
+ * kein aufgesetztes Abzeichen-System, sondern die Grundmetapher der App: Was
+ * hier steht, besitzt man — es ist der Gegenwert für alles, was vorher an
+ * Schichten, Umplanungen und durchgezogenen Einheiten lag.
+ *
+ * Zwei Grundsätze:
+ *
+ *   1. **Nichts wird verschenkt.** Jede Seele hängt an einer nachprüfbaren
+ *      Bedingung aus den echten Daten.
+ *   2. **Nichts bestraft.** Eine verpasste Einheit bricht keinen Streak, solange
+ *      sie regelkonform umgeplant wurde. Wer ein Leben hat, verliert hier nichts.
+ */
+
+import { daysBetween } from './dates';
+import { resolveShiftDay, type ShiftContext } from './shifts';
+import {
+  type IsoDate,
+  type Mesocycle,
+  type Microcycle,
+  type PersonalRecord,
+  type Session,
+  type SessionLog,
+  type SoulRarity,
+  type SoulSourceKind,
+} from './types';
+
+export interface SoulContext {
+  sessions: Session[];
+  logs: SessionLog[];
+  microcycles: Microcycle[];
+  mesocycles: Mesocycle[];
+  records: PersonalRecord[];
+  shiftContext: ShiftContext;
+  today: IsoDate;
+}
+
+/** Was eingesammelt werden kann, bevor es eingesammelt wurde. */
+export interface SoulDefinition {
+  key: string;
+  name: string;
+  description: string;
+  rarity: SoulRarity;
+  sourceKind: SoulSourceKind;
+  /**
+   * Findet alle Gelegenheiten, bei denen diese Seele verdient wurde.
+   * Mehrfach einsammelbare Seelen liefern je Gelegenheit eine eigene sourceId.
+   */
+  earned: (ctx: SoulContext) => Array<{ sourceId: string | null; detail: string; date: IsoDate }>;
+  /** Fortschritt für "in Reichweite", falls messbar. */
+  progress?: (ctx: SoulContext) => { current: number; target: number; unit: string } | null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Hilfsgrößen                                                         */
+/* ------------------------------------------------------------------ */
+
+function completedLogs(ctx: SoulContext): Array<{ session: Session; log: SessionLog }> {
+  const byId = new Map(ctx.sessions.map((s) => [s.id, s]));
+  return ctx.logs
+    .filter((l) => l.completed)
+    .map((log) => ({ session: byId.get(log.sessionId), log }))
+    .filter((x): x is { session: Session; log: SessionLog } => x.session !== undefined)
+    .sort((a, b) => a.log.date.localeCompare(b.log.date));
+}
+
+function totalMinutes(ctx: SoulContext): number {
+  return completedLogs(ctx).reduce((sum, x) => sum + (x.log.durationMin ?? 0), 0);
+}
+
+export type CycleVerdict = 'clean' | 'broken' | 'running';
+
+/**
+ * War dieser Zyklus sauber?
+ *
+ * Sauber heißt: jede geplante Einheit wurde entweder erledigt oder regelkonform
+ * umgeplant. Der Unterschied liegt im Status — `skipped` mit Begründung ist eine
+ * Entscheidung der App, `missed` ist eine, die offen geblieben ist. Nur letztere
+ * bricht die Serie.
+ */
+export function cycleVerdict(micro: Microcycle, sessions: Session[], today: IsoDate): CycleVerdict {
+  if (micro.endDate >= today) return 'running';
+
+  const own = sessions.filter((s) => s.microcycleId === micro.id);
+  if (own.length === 0) return 'running';
+
+  const done = own.filter((s) => s.status === 'done');
+  if (done.length === 0) return 'broken';
+
+  const unresolved = own.filter(
+    (s) => s.status === 'missed' || (s.status === 'planned' && s.date < today),
+  );
+  if (unresolved.length > 0) return 'broken';
+
+  return 'clean';
+}
+
+/** Wie viele abgeschlossene Zyklen in Folge sauber waren, bis heute zurück. */
+export function currentStreak(ctx: SoulContext): number {
+  const finished = ctx.microcycles
+    .filter((m) => m.endDate < ctx.today)
+    .sort((a, b) => a.startDate.localeCompare(b.startDate));
+
+  let streak = 0;
+  for (let i = finished.length - 1; i >= 0; i--) {
+    if (cycleVerdict(finished[i], ctx.sessions, ctx.today) === 'clean') streak++;
+    else break;
+  }
+  return streak;
+}
+
+/* ------------------------------------------------------------------ */
+/* Der Katalog                                                         */
+/* ------------------------------------------------------------------ */
+
+function volumeSoul(
+  key: string,
+  name: string,
+  description: string,
+  rarity: SoulRarity,
+  threshold: number,
+): SoulDefinition {
+  return {
+    key,
+    name,
+    description,
+    rarity,
+    sourceKind: 'volume',
+    earned: (ctx) => {
+      const logs = completedLogs(ctx);
+      let running = 0;
+      for (const { log } of logs) {
+        running += log.durationMin ?? 0;
+        if (running >= threshold) {
+          return [{ sourceId: null, detail: `${threshold} Minuten Training`, date: log.date }];
+        }
+      }
+      return [];
+    },
+    progress: (ctx) => {
+      const current = totalMinutes(ctx);
+      return current >= threshold ? null : { current, target: threshold, unit: 'Min' };
+    },
+  };
+}
+
+function streakSoul(
+  key: string,
+  name: string,
+  description: string,
+  rarity: SoulRarity,
+  target: number,
+): SoulDefinition {
+  return {
+    key,
+    name,
+    description,
+    rarity,
+    sourceKind: 'streak',
+    earned: (ctx) => {
+      // Auch eine frühere, längst gebrochene Serie zählt — einmal verdient
+      // bleibt verdient.
+      const finished = ctx.microcycles
+        .filter((m) => m.endDate < ctx.today)
+        .sort((a, b) => a.startDate.localeCompare(b.startDate));
+
+      let run = 0;
+      for (const micro of finished) {
+        if (cycleVerdict(micro, ctx.sessions, ctx.today) === 'clean') {
+          run++;
+          if (run >= target) {
+            return [{ sourceId: null, detail: `${target} Zyklen in Folge`, date: micro.endDate }];
+          }
+        } else {
+          run = 0;
+        }
+      }
+      return [];
+    },
+    progress: (ctx) => {
+      const streak = currentStreak(ctx);
+      return streak >= target ? null : { current: streak, target, unit: 'Zyklen' };
+    },
+  };
+}
+
+export const SOUL_CATALOG: SoulDefinition[] = [
+  {
+    key: 'first_session',
+    name: 'Der erste Schritt',
+    description: 'Die erste Einheit, die du protokolliert hast. Alles Weitere baut darauf auf.',
+    rarity: 'common',
+    sourceKind: 'manual',
+    earned: (ctx) => {
+      const first = completedLogs(ctx)[0];
+      return first ? [{ sourceId: null, detail: first.session.title, date: first.log.date }] : [];
+    },
+  },
+
+  {
+    key: 'shift_session',
+    name: 'Nach zwölf Stunden',
+    description:
+      'Eine Einheit an einem vollen Schichttag. Die zählt doppelt, auch wenn sie im Plan nur einmal steht.',
+    rarity: 'common',
+    sourceKind: 'manual',
+    earned: (ctx) => {
+      for (const { session, log } of completedLogs(ctx)) {
+        const day = resolveShiftDay(log.date, ctx.shiftContext);
+        if (day.capacity === 'light') {
+          return [{ sourceId: null, detail: `${session.title} an ${day.shiftType.name}`, date: log.date }];
+        }
+      }
+      return [];
+    },
+  },
+
+  {
+    key: 'night_before',
+    name: 'Vor der Nacht',
+    description:
+      'Trainiert am Vormittag vor der Nachtschicht — die Einheit, die am leichtesten ausfällt.',
+    rarity: 'common',
+    sourceKind: 'manual',
+    earned: (ctx) => {
+      for (const { session, log } of completedLogs(ctx)) {
+        const day = resolveShiftDay(log.date, ctx.shiftContext);
+        if (day.shiftType.crossesMidnight) {
+          return [{ sourceId: null, detail: session.title, date: log.date }];
+        }
+      }
+      return [];
+    },
+  },
+
+  {
+    key: 'cycle_clean',
+    name: 'Zyklus geschlossen',
+    description:
+      'Ein voller Rotationsdurchlauf ohne offene Einheit. Umgeplant zählt — nur Liegengelassenes nicht.',
+    rarity: 'common',
+    sourceKind: 'microcycle',
+    earned: (ctx) =>
+      ctx.microcycles
+        .filter((m) => cycleVerdict(m, ctx.sessions, ctx.today) === 'clean')
+        .map((m) => ({
+          sourceId: m.id,
+          detail: `${m.lengthDays} Tage, Last ${m.plannedLoad}`,
+          date: m.endDate,
+        })),
+    progress: (ctx) => {
+      const running = ctx.microcycles.find((m) => m.startDate <= ctx.today && m.endDate >= ctx.today);
+      if (!running) return null;
+      const own = ctx.sessions.filter((s) => s.microcycleId === running.id && s.status !== 'skipped');
+      const done = own.filter((s) => s.status === 'done').length;
+      return own.length > 0 ? { current: done, target: own.length, unit: 'Einheiten' } : null;
+    },
+  },
+
+  {
+    key: 'deload_held',
+    name: 'Die Kunst des Weniger',
+    description:
+      'Eine Entlastungswoche wirklich locker gehalten. Schwerer als es klingt, und mehr wert als eine harte.',
+    rarity: 'common',
+    sourceKind: 'microcycle',
+    earned: (ctx) =>
+      ctx.microcycles
+        .filter((m) => m.isDeload && cycleVerdict(m, ctx.sessions, ctx.today) === 'clean')
+        .map((m) => ({ sourceId: m.id, detail: 'Deload durchgehalten', date: m.endDate })),
+  },
+
+  volumeSoul(
+    'volume_500',
+    'Fundament',
+    '500 Minuten Training gesammelt. Der Anfang, den die meisten nicht schaffen.',
+    'common',
+    500,
+  ),
+
+  {
+    key: 'double_day',
+    name: 'Doppelt genommen',
+    description: 'Laufen und Kraft an einem Tag — beides erledigt, nicht nur geplant.',
+    rarity: 'rare',
+    sourceKind: 'manual',
+    earned: (ctx) => {
+      const byDate = new Map<IsoDate, Session[]>();
+      for (const { session } of completedLogs(ctx)) {
+        const list = byDate.get(session.date) ?? [];
+        list.push(session);
+        byDate.set(session.date, list);
+      }
+      return [...byDate.entries()]
+        .filter(([, list]) => list.length >= 2 && new Set(list.map((s) => s.discipline)).size >= 2)
+        .map(([date, list]) => ({
+          sourceId: date,
+          detail: list.map((s) => s.title).join(' + '),
+          date,
+        }));
+    },
+  },
+
+  {
+    key: 'new_record',
+    name: 'Neue Bestmarke',
+    description: 'Ein Wert, den es vorher nicht gab. Die einzige Zahl, die wirklich etwas beweist.',
+    rarity: 'rare',
+    sourceKind: 'pr',
+    earned: (ctx) =>
+      ctx.records
+        // Nur echte Verbesserungen, nicht der allererste eingetragene Wert.
+        .filter((r) => r.previousValue !== null)
+        // Das geschätzte 1RM ist abgeleitet, kein eigener Erfolg — sonst gäbe
+        // es für einen schweren Satz gleich zwei Seelen.
+        .filter((r) => r.kind !== 'estimated1rm')
+        .map((r) => ({
+          sourceId: r.id,
+          detail: `${r.value} ${r.unit} statt ${r.previousValue} ${r.unit}`,
+          date: r.date,
+        })),
+  },
+
+  streakSoul(
+    'streak_3',
+    'Drei am Stück',
+    'Drei Zyklen in Folge geschlossen. Ab hier ist es Gewohnheit, nicht mehr Motivation.',
+    'rare',
+    3,
+  ),
+
+  volumeSoul(
+    'volume_2000',
+    'Ausdauer',
+    '2000 Minuten gesammelt. Mehr als 33 Stunden, die niemand außer dir gesehen hat.',
+    'rare',
+    2000,
+  ),
+
+  {
+    key: 'meso_complete',
+    name: 'Block vollendet',
+    description:
+      'Ein ganzer Trainingsblock von der ersten Belastung bis zum letzten Deload-Tag.',
+    rarity: 'rare',
+    sourceKind: 'mesocycle',
+    earned: (ctx) =>
+      ctx.mesocycles
+        .filter((meso) => {
+          if (meso.endDate >= ctx.today) return false;
+          const own = ctx.microcycles.filter((m) => m.mesocycleId === meso.id);
+          if (own.length === 0) return false;
+          const clean = own.filter((m) => cycleVerdict(m, ctx.sessions, ctx.today) === 'clean');
+          return clean.length / own.length >= 0.8;
+        })
+        .map((meso) => ({ sourceId: meso.id, detail: meso.name, date: meso.endDate })),
+    progress: (ctx) => {
+      const running = ctx.mesocycles.find((m) => m.startDate <= ctx.today && m.endDate >= ctx.today);
+      if (!running) return null;
+      const own = ctx.microcycles.filter((m) => m.mesocycleId === running.id);
+      const done = own.filter((m) => m.endDate < ctx.today).length;
+      return { current: done, target: own.length, unit: 'Zyklen' };
+    },
+  },
+
+  {
+    key: 'comeback',
+    name: 'Wiederkehr',
+    description:
+      'Nach zwei Wochen Pause zurück auf die Bahn. Der schwerste Schritt im ganzen Sport.',
+    rarity: 'legendary',
+    sourceKind: 'comeback',
+    earned: (ctx) => {
+      const logs = completedLogs(ctx);
+      const out: Array<{ sourceId: string; detail: string; date: IsoDate }> = [];
+      for (let i = 1; i < logs.length; i++) {
+        const gap = daysBetween(logs[i - 1].log.date, logs[i].log.date);
+        if (gap >= 14) {
+          out.push({
+            sourceId: logs[i].log.date,
+            detail: `${gap} Tage Pause, dann ${logs[i].session.title}`,
+            date: logs[i].log.date,
+          });
+        }
+      }
+      return out;
+    },
+  },
+
+  streakSoul(
+    'streak_12',
+    'Unbeirrbar',
+    'Zwölf Zyklen in Folge. Zwei Monate, in denen die Schicht dich nicht aufgehalten hat.',
+    'legendary',
+    12,
+  ),
+
+  volumeSoul(
+    'volume_10000',
+    'Zehntausend',
+    '10 000 Minuten. Das ist keine Phase mehr, das ist wer du bist.',
+    'legendary',
+    10000,
+  ),
+];
+
+export const SOUL_BY_KEY = new Map(SOUL_CATALOG.map((d) => [d.key, d]));
+
+/* ------------------------------------------------------------------ */
+/* Auswertung                                                          */
+/* ------------------------------------------------------------------ */
+
+export interface EarnedSoul {
+  definition: SoulDefinition;
+  sourceId: string | null;
+  detail: string;
+  date: IsoDate;
+}
+
+/** Alle Seelen, die nach dem aktuellen Datenstand verdient sind. */
+export function evaluateSouls(ctx: SoulContext): EarnedSoul[] {
+  const out: EarnedSoul[] = [];
+  for (const definition of SOUL_CATALOG) {
+    for (const hit of definition.earned(ctx)) {
+      out.push({ definition, ...hit });
+    }
+  }
+  return out;
+}
+
+export interface SoulProgress {
+  definition: SoulDefinition;
+  current: number;
+  target: number;
+  unit: string;
+  /** 0–1. */
+  ratio: number;
+}
+
+/**
+ * Seelen in Reichweite — sortiert nach Nähe.
+ * Bewusst nur die, die messbar näher rücken; ein "vielleicht irgendwann"
+ * motiviert niemanden.
+ */
+export function soulsInReach(
+  ctx: SoulContext,
+  collectedKeys: Set<string>,
+  limit = 3,
+): SoulProgress[] {
+  const out: SoulProgress[] = [];
+
+  for (const definition of SOUL_CATALOG) {
+    if (!definition.progress) continue;
+    // Mehrfach einsammelbare Seelen bleiben in Reichweite, einmalige nicht.
+    const repeatable = definition.key === 'cycle_clean' || definition.key === 'meso_complete';
+    if (!repeatable && collectedKeys.has(definition.key)) continue;
+
+    const progress = definition.progress(ctx);
+    if (!progress || progress.target <= 0) continue;
+    if (progress.current >= progress.target) continue;
+
+    out.push({ definition, ...progress, ratio: progress.current / progress.target });
+  }
+
+  return out.sort((a, b) => b.ratio - a.ratio).slice(0, limit);
+}
+
+export const RARITY_ORDER: Record<SoulRarity, number> = {
+  legendary: 0,
+  rare: 1,
+  common: 2,
+};

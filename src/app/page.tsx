@@ -11,6 +11,7 @@ import { blockStatus, explainRestDay, explainSession } from '@/lib/explain';
 import { applyRescheduleProposal, buildRescheduleProposal, markSessionMissed } from '@/lib/plan-store';
 import { appointmentsOn, suggestTasks, taskEnergyBudget, tasksBlockedByEnergy } from '@/lib/tasks';
 import { completeTask } from '@/lib/task-store';
+import { getSoulsInReach } from '@/lib/soul-store';
 import type { ReschedulePlan } from '@/lib/replan';
 import { CAPACITY_LABEL, TASK_ENERGY_LABEL, type Session, type Task } from '@/lib/types';
 import { Button, CapacityBadge, Card, Notice, Section } from '@/components/ui';
@@ -35,8 +36,14 @@ export default function HeutePage() {
     const micros = await db.microcycles.toArray();
     const hasPlan = (await db.macrocycles.count()) > 0;
     const tasks = await db.tasks.where('status').equals('open').toArray();
-    return { sessions, micros, hasPlan, tasks };
+    const souls = await db.souls.orderBy('collectedAt').reverse().limit(3).toArray();
+    return { sessions, micros, hasPlan, tasks, souls };
   }, [todayIso]);
+
+  // Nur lesend: Die Auswertung selbst läuft beim App-Start und nach jedem
+  // Protokoll — ein Schreibzugriff in einem LiveQuery würde die Seite abstürzen
+  // lassen.
+  const inReach = useLiveQuery(() => getSoulsInReach(3), [todayIso]);
 
   if (!ctx || !settings || !data) return <p className="text-sm text-ink-faint">Lade …</p>;
 
@@ -355,12 +362,68 @@ export default function HeutePage() {
         </Section>
       ) : null}
 
-      {/* 5 — Seelen, kommt in Phase 6 */}
+      {/* 5 — Seelen: was gerade greifbar ist */}
       <Section title="Seelen in Reichweite">
-        <Notice tone="info">
-          Der Soul Collector kommt in Phase 6. Hier stehen dann die Meilensteine, die gerade greifbar
-          sind — abgeschlossener Block, neuer Bestwert, durchgehaltener Zyklus.
-        </Notice>
+        {inReach && inReach.length > 0 ? (
+          <div className="space-y-2">
+            {inReach.map((progress) => (
+              <Link
+                key={progress.definition.key}
+                href="/seelen"
+                className="block rounded border border-line bg-surface px-3 py-2.5 transition-colors hover:border-line-strong"
+              >
+                <div className="mb-1 flex items-baseline gap-2">
+                  <span className="text-xs text-ember-dim">
+                    {progress.definition.rarity === 'legendary'
+                      ? '◆'
+                      : progress.definition.rarity === 'rare'
+                        ? '◈'
+                        : '◇'}
+                  </span>
+                  <span className="flex-1 truncate text-sm text-ink">{progress.definition.name}</span>
+                  <span className="shrink-0 text-[11px] text-ink-faint tabular">
+                    {progress.current} / {progress.target} {progress.unit}
+                  </span>
+                </div>
+                <div className="h-1 overflow-hidden rounded-full bg-surface-2">
+                  <div
+                    className="h-full rounded-full bg-ember-dim"
+                    style={{ width: `${Math.min(100, progress.ratio * 100)}%` }}
+                  />
+                </div>
+              </Link>
+            ))}
+          </div>
+        ) : data.souls.length > 0 ? (
+          <div className="space-y-1.5">
+            {data.souls.map((soul) => (
+              <div
+                key={soul.id}
+                className="flex items-center gap-2 rounded border border-line bg-surface px-3 py-2"
+              >
+                <span className="text-xs text-ember">
+                  {soul.rarity === 'legendary' ? '◆' : soul.rarity === 'rare' ? '◈' : '◇'}
+                </span>
+                <span className="flex-1 truncate text-sm text-ink">{soul.name}</span>
+                <span className="shrink-0 text-[11px] text-ink-faint tabular">
+                  {formatShort(soul.collectedAt.slice(0, 10))}
+                </span>
+              </div>
+            ))}
+            <p className="pt-1 text-xs text-ink-faint">
+              <Link href="/seelen" className="underline">
+                Zum Soul Vault
+              </Link>
+            </p>
+          </div>
+        ) : (
+          <Notice tone="info">
+            Die erste Seele kommt mit der ersten protokollierten Einheit.{' '}
+            <Link href="/seelen" className="text-ember underline">
+              Ansehen, was es zu holen gibt
+            </Link>
+          </Notice>
+        )}
       </Section>
     </>
   );

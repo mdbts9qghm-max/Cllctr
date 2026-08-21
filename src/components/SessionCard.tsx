@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import type { SessionExplanation } from '@/lib/explain';
-import type { Session } from '@/lib/types';
+import type { Session, Soul } from '@/lib/types';
 import { Button } from './ui';
 import { NewRecordsNotice, SessionLogForm } from './SessionLogForm';
 
@@ -22,6 +22,7 @@ export function SessionCard({
 }) {
   const [logging, setLogging] = useState(false);
   const [newRecords, setNewRecords] = useState<string[]>([]);
+  const [newSouls, setNewSouls] = useState<Soul[]>([]);
 
   const done = session.status === 'done';
 
@@ -65,15 +66,16 @@ export function SessionCard({
       {logging ? (
         <SessionLogForm
           session={session}
-          onSaved={(records) => {
+          onSaved={(records, souls) => {
             setNewRecords(records);
+            setNewSouls(souls);
             setLogging(false);
           }}
           onCancel={() => setLogging(false)}
         />
       ) : (
         <div>
-          <NewRecordsNotice records={newRecords} />
+          <NewRecordsNotice records={newRecords} souls={newSouls} />
           <div className="flex flex-wrap gap-2">
             {done ? (
               <Button onClick={() => setLogging(true)}>Protokoll bearbeiten</Button>

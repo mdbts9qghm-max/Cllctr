@@ -163,7 +163,7 @@ deshalb bereits in Phase 1 gebaut, nicht am Ende.
 | 3 | Heute-Screen | **fertig** |
 | 4 | Tasks | **fertig** |
 | 5 | Statistiken (`recharts`) | **fertig** |
-| 6 | Soul Collector Layer | offen |
+| 6 | Soul Collector Layer | **fertig** |
 | 7 | PWA, Polish, Deployment | offen |
 
 ### Phase 1 — geliefert
@@ -479,6 +479,92 @@ eigene Komponente (`SessionLogForm`) und im Plan genauso verfügbar.
 - Ende-zu-Ende: Kniebeuge 120 kg × 5 → Bestwert 120 kg und 1RM 140 kg; 5 km in
   22:45 → Bestzeit; Übungsauswahl disziplin-gefiltert
 - Achsen und Beschriftungen im gerenderten Screenshot auf Beschnitt geprüft
+
+---
+
+## Phase 6 — Soul Collector
+
+Jeder erreichte Meilenstein ist eine Seele. Zwei Grundsätze tragen den ganzen Layer:
+
+1. **Nichts wird verschenkt.** Jede Seele hängt an einer nachprüfbaren Bedingung aus den
+   echten Daten — keine Teilnahme-Abzeichen.
+2. **Nichts bestraft.** Eine verpasste Einheit bricht keinen Streak, solange sie
+   regelkonform umgeplant wurde.
+
+### Die Streak-Regel
+
+Ein Zyklus gilt als **sauber**, wenn jede geplante Einheit entweder erledigt oder
+regelkonform umgeplant wurde. Der Unterschied steckt im Status:
+
+| Status | Bedeutung | Bricht den Streak? |
+|---|---|---|
+| `done` | erledigt | nein |
+| `skipped` mit Begründung | die App hat entschieden, dass sie entfällt | **nein** |
+| `missed` | offen geblieben | ja |
+| `planned` in der Vergangenheit | nie abgehakt | ja |
+
+Damit ist die Vorgabe „eine verpasste Session bricht keinen Streak, wenn ich sie
+regelkonform verschiebe" wörtlich umgesetzt: Wer den Vorschlag der App annimmt, verliert
+nichts. Nur wer „nur als verpasst markieren" wählt, lässt etwas offen.
+
+### Der Katalog
+
+14 Seelen in drei Stufen. Mehrere sind bewusst auf diese Lebenssituation gemünzt:
+
+| Seele | Bedingung | Stufe |
+|---|---|---|
+| Der erste Schritt | erste protokollierte Einheit | gewöhnlich |
+| Nach zwölf Stunden | Einheit an einem vollen Schichttag | gewöhnlich |
+| Vor der Nacht | Einheit am Vormittag vor der Nachtschicht | gewöhnlich |
+| Zyklus geschlossen | Rotationsdurchlauf ohne offene Einheit | gewöhnlich |
+| Die Kunst des Weniger | Deload wirklich locker gehalten | gewöhnlich |
+| Fundament | 500 Minuten | gewöhnlich |
+| Doppelt genommen | Laufen und Kraft an einem Tag, beides erledigt | selten |
+| Neue Bestmarke | echte Verbesserung eines Bestwerts | selten |
+| Drei am Stück | 3 saubere Zyklen in Folge | selten |
+| Ausdauer | 2000 Minuten | selten |
+| Block vollendet | ganzer Mesozyklus | selten |
+| Wiederkehr | Einheit nach ≥ 14 Tagen Pause | legendär |
+| Unbeirrbar | 12 saubere Zyklen in Folge | legendär |
+| Zehntausend | 10 000 Minuten | legendär |
+
+Das geschätzte 1RM löst **keine** eigene Seele aus — es ist abgeleitet, sonst gäbe es für
+einen schweren Satz gleich zwei.
+
+### Der Vault
+
+Seltenheit über die eine Akzentfarbe abgestuft (`◇` Rand grau, `◈` gedämpftes Bernstein,
+`◆` volles Bernstein mit leichtem Schein) — kein Regenbogen, kein Konfetti.
+
+- Die große Zahl ist der **Besitz**, nicht der Fortschritt; die Vollständigkeit steht klein
+  darunter.
+- Mehrfach eingesammelte Seelen werden zu einem Eintrag mit `×N` zusammengefasst. Vier
+  gleichnamige Karten untereinander sehen aus wie ein Fehler und entwerten das, was sie
+  feiern sollen.
+- **Offene Seelen sind sichtbar**, mit Beschreibung und Fortschrittsbalken. Man jagt
+  leichter, was man kennt.
+
+### Verwoben, nicht versteckt
+
+- Auf dem **Heute-Screen**: die drei Seelen, die gerade am nächsten sind, mit Balken.
+- Nach jedem **Protokoll**: neu eingesammelte Seelen erscheinen direkt neben den Bestwerten.
+- Beim **App-Start**: eine Auswertung, damit auch Seelen ankommen, die fällig wurden,
+  während die App zu war.
+
+### Eine Falle, die Zeit gekostet hat
+
+Die Auswertung schreibt — und lief zunächst innerhalb eines Dexie-`liveQuery`. Das lässt
+die Seite mit einer Client-Exception abstürzen. Schreiben und Anzeigen sind jetzt
+getrennt: `syncSouls()` läuft aus Effekten heraus, `getSoulsInReach()` ist rein lesend und
+darf beobachtet werden.
+
+### Geprüft
+
+- Streak-Regel in allen vier Statusfällen, Streak über mehrere Zyklen mit Bruch in der Mitte
+- Comeback nur bei echter Pause, Bestwert-Seele nur bei echter Verbesserung
+- Keine doppelten Schlüssel im Katalog
+- Ende-zu-Ende: leerer Vault, erste Seele nach dem Abhaken, Fortschritt auf dem
+  Heute-Screen, Persistenz in IndexedDB, und mehrfaches Auswerten legt nichts doppelt an
 
 ---
 

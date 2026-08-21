@@ -16,7 +16,7 @@ import {
   toggleSessionLock,
 } from '@/lib/plan-store';
 import type { ReschedulePlan } from '@/lib/replan';
-import { SESSION_STATUS_LABEL, type Session } from '@/lib/types';
+import { SESSION_STATUS_LABEL, type Session, type Soul } from '@/lib/types';
 import { Button, Card, Notice, Section } from '@/components/ui';
 import { NewRecordsNotice, SessionLogForm } from '@/components/SessionLogForm';
 
@@ -29,6 +29,7 @@ export default function PlanPage() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [loggingId, setLoggingId] = useState<string | null>(null);
   const [newRecords, setNewRecords] = useState<string[]>([]);
+  const [newSouls, setNewSouls] = useState<Soul[]>([]);
   const [proposal, setProposal] = useState<ReschedulePlan | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -320,15 +321,16 @@ export default function PlanPage() {
                             {loggingId === session.id ? (
                               <SessionLogForm
                                 session={session}
-                                onSaved={(records) => {
+                                onSaved={(records, souls) => {
                                   setNewRecords(records);
+                                  setNewSouls(souls);
                                   setLoggingId(null);
                                 }}
                                 onCancel={() => setLoggingId(null)}
                               />
                             ) : (
                               <>
-                                <NewRecordsNotice records={newRecords} />
+                                <NewRecordsNotice records={newRecords} souls={newSouls} />
                                 <div className="flex flex-wrap gap-2">
                                   {session.status === 'planned' ? (
                                     <>
