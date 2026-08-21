@@ -185,7 +185,7 @@ Mit der echten Rotation und den Zielen 3× Kraft, 2× Laufen, 1× optional:
 | Urteil | **knapp** — in schwachen Wochen fehlt ein harter Tag |
 
 Der Generator löst das über mehrere Zyklen hinweg. Tatsächlich erzeugtes Volumen:
-**3,1× Kraft und 2,8× Laufen pro Woche** — beide Ziele erreicht.
+**3,0× Kraft und 3,0× Laufen pro Woche** — beide Ziele erreicht.
 
 ---
 
@@ -230,15 +230,26 @@ Rotation gibt sonst nicht mehr her.
 
 ### Belastungsregeln
 
-- **Harter Tag** ab `load ≥ 7`. Gemeint ist systemische und Bein-Ermüdung — Kraft Oberkörper
-  liegt bewusst bei 6, sonst würde die Regel diese Einheit dauerhaft blockieren, weil die
-  beiden freien Tage nebeneinander liegen.
-- **Höchstens 2 harte Tage in Folge.** Die reine Lehre sagt „nie zwei am Stück"; diese
-  Rotation stellt die freien Tage aber direkt nebeneinander — mit einer strikten Eins bliebe
-  einer davon dauerhaft ungenutzt.
-- **Dieselbe Einheit nie an zwei aufeinanderfolgenden Tagen**, unabhängig von der Härte:
-  dieselbe Muskulatur bekäme sonst keine 24 Stunden Erholung.
-- **Eine Einheit pro Tag.**
+- **Hart ist nur Laufen.** `countsAsHardDay` ist bewusst von `load` getrennt: Krafttraining
+  ist anstrengend, blockiert den Folgetag aber nicht wie eine harte Laufeinheit. Nur
+  Intervalle, Tempolauf und Long Run zählen.
+- **Nie zwei harte Tage in Folge.** Weil Gym nicht zählt, lassen sich die beiden
+  nebeneinanderliegenden freien Tage trotzdem beide nutzen: einer bekommt den harten Lauf,
+  der andere Gym.
+- **Dieselbe Einheit nie an zwei aufeinanderfolgenden Tagen** — dieselbe Muskulatur bekäme
+  sonst keine 24 Stunden Erholung. Die Prüfung läuft über Zyklusgrenzen hinweg: der letzte
+  Tag des vorherigen Zyklus wird als eingefrorener Kontext-Slot mitgeführt.
+- **Eine Einheit pro Tag** — Ausnahme ist der Doppeltag.
+
+### Doppeltag
+
+Höchstens **einer pro Zyklus**, nur an einem Tag voller Kapazität, immer **eine Lauf- und
+eine Krafteinheit**, Laufen zuerst (mit frischen Beinen läuft es sich besser). Nie zweimal
+dieselbe Disziplin, nie im Deload.
+
+Bewusst ein Ausweg, kein Normalfall: Der Generator greift erst im dritten Durchgang darauf
+zu — für Einheiten, die sonst ganz ausfallen oder in verkürzter Form feststecken würden.
+Abschaltbar über `allowDoubleDayPerCycle`.
 
 ### Adaptives Umplanen (`replan.ts`)
 
@@ -247,12 +258,14 @@ Bei einer verpassten Einheit, in dieser Reihenfolge:
 1. Filler (Recovery, lockeres Volumen, Mobility) fallen ersatzlos weg.
 2. Key-Sessions suchen einen Ersatztag mit genug Kapazität.
 3. Lockere Einheiten am Zieltag weichen.
-4. Ist kein Tag frei, greift das **Planungsprofil**: eine Laufeinheit darf eine Krafteinheit
+4. **Doppeltag** — passt die Einheit als zweite an einen freien Tag mit einer Einheit der
+   anderen Disziplin, geht nichts verloren. Kommt vor dem Verdrängen, weil es billiger ist.
+5. Ist kein Tag frei, greift das **Planungsprofil**: eine Laufeinheit darf eine Krafteinheit
    verdrängen, aber nie umgekehrt. Die verdrängte Einheit sucht sich selbst einen neuen Tag
    (eine Kaskadenstufe, danach entfällt sie).
-5. Erst dann die **reduzierte Form** — ein Long Run wird zum lockeren Dauerlauf. Kleiner ist
+6. Erst dann die **reduzierte Form** — ein Long Run wird zum lockeren Dauerlauf. Kleiner ist
    besser als gar nicht.
-6. Bleibt alles erfolglos, entfällt die Einheit — mit Begründung, welche Tage im Weg standen.
+7. Bleibt alles erfolglos, entfällt die Einheit — mit Begründung, welche Tage im Weg standen.
 
 Fixierte Einheiten (`locked`) fasst der Umplaner nie an. Jeder Vorschlag wird erklärt und
 erst nach Bestätigung angewendet.
@@ -261,9 +274,11 @@ erst nach Bestätigung angewendet.
 
 Automatisierte Durchläufe (nicht im Repo, in der Sitzung ausgeführt):
 
-- Generator über 3 Startdaten × 3 Profile: keine Regelverletzung, keine Doppelbelegung
+- Generator über 3 Startdaten × 3 Profile: keine Regelverletzung, Doppeltage immer
+  Kraft + Laufen, nie mehr als zwei Einheiten pro Tag
 - 40 aufeinanderfolgende Umplanungen: alle Regeln halten
-- Ende-zu-Ende im Browser: Plan erzeugen, Einheit verpassen, Vorschlag übernehmen
+- Ende-zu-Ende gegen den statischen Export: Plan erzeugen, Einheit verpassen, Vorschlag
+  übernehmen, Doppeltag in Plan- und Heute-Screen
 
 ### Offene Punkte
 

@@ -210,6 +210,27 @@ export default function SetupPage() {
             </span>
           </label>
 
+          <label className="mt-4 flex items-start gap-3 border-t border-line pt-4">
+            <input
+              type="checkbox"
+              checked={settings.allowDoubleDayPerCycle}
+              onChange={(e) =>
+                void db.settings.update('singleton', {
+                  allowDoubleDayPerCycle: e.target.checked,
+                  updatedAt: now(),
+                })
+              }
+              className="mt-1 size-4 accent-[#e0a43c]"
+            />
+            <span className="text-sm leading-relaxed text-ink">
+              Doppeltag zulassen, höchstens einer pro Zyklus
+              <span className="mt-0.5 block text-xs text-ink-faint">
+                Zwei Einheiten an einem freien Tag — immer eine Lauf- und eine Krafteinheit, Laufen
+                zuerst. Wird nur genutzt, wenn sonst etwas ausfallen oder verkürzt werden müsste.
+              </span>
+            </span>
+          </label>
+
           <p className="mt-4 border-t border-line pt-3 text-xs leading-relaxed text-ink-faint">
             Änderungen wirken auf den nächsten erzeugten Plan. Der laufende Plan bleibt, bis du ihn
             unter Plan neu erzeugst.

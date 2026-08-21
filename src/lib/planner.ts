@@ -31,19 +31,15 @@ import {
   type WeeklyTargets,
 } from './types';
 
-/** Ab diesem Belastungswert gilt ein Tag als hart. */
-const HARD_LOAD_THRESHOLD = 7;
-
 /**
- * Wie viele harte Tage direkt aufeinander liegen dürfen.
+ * Keine zwei harten Tage in Folge.
  *
- * Eigentlich lautet die Regel "nie zwei am Stück". Diese Rotation stellt die
- * beiden freien Tage aber direkt nebeneinander — mit einer strikten Eins bliebe
- * einer davon dauerhaft ungenutzt. Zwei sind deshalb erlaubt, drei nie, und auf
- * einen harten Block folgt immer ein lockerer Tag (das liefert die Rotation von
- * selbst, weil nach frei-frei die Tagschicht kommt).
+ * Als hart zählen nur Intervalle, Tempolauf und Long Run (siehe
+ * SessionTypeMeta.countsAsHardDay) — Krafttraining nicht. Deshalb lassen sich
+ * die beiden nebeneinanderliegenden freien Tage trotz dieser strengen Regel
+ * beide nutzen: einer bekommt den harten Lauf, der andere Gym.
  */
-const MAX_CONSECUTIVE_HARD_DAYS = 2;
+const MAX_CONSECUTIVE_HARD_DAYS = 1;
 
 /* ------------------------------------------------------------------ */
 /* Inhalte                                                             */
@@ -308,13 +304,24 @@ function buildCandidates(
 /* Platzierung                                                         */
 /* ------------------------------------------------------------------ */
 
+/** Ein Tag kann eine Einheit tragen — an einem Doppeltag ausnahmsweise zwei. */
 interface DaySlot {
   day: ResolvedShiftDay;
-  assigned: SessionTypeKey | null;
+  assigned: SessionTypeKey[];
+  /**
+   * Nur Kontext, nicht belegbar. Der letzte Tag des vorherigen Zyklus wird so
+   * mitgeführt, damit die Regeln über die Zyklusgrenze hinweg greifen — sonst
+   * könnte direkt nach einem harten Tag am Zyklusende der nächste folgen.
+   */
+  readonly frozen: boolean;
 }
 
-function isHard(type: SessionTypeKey | null): boolean {
-  return type !== null && SESSION_TYPES[type].load >= HARD_LOAD_THRESHOLD;
+function isHard(type: SessionTypeKey): boolean {
+  return SESSION_TYPES[type].countsAsHardDay;
+}
+
+function dayIsHard(slot: DaySlot | undefined): boolean {
+  return slot !== undefined && slot.assigned.some(isHard);
 }
 
 /** Würde dieser Typ an dieser Stelle einen zu langen harten Block erzeugen? */
@@ -322,22 +329,9 @@ function hardBlockOk(slots: DaySlot[], index: number, type: SessionTypeKey): boo
   if (!isHard(type)) return true;
 
   let run = 1;
-  for (let i = index - 1; i >= 0 && isHard(slots[i].assigned); i--) run++;
-  for (let i = index + 1; i < slots.length && isHard(slots[i].assigned); i++) run++;
+  for (let i = index - 1; i >= 0 && dayIsHard(slots[i]); i--) run++;
+  for (let i = index + 1; i < slots.length && dayIsHard(slots[i]); i++) run++;
   return run <= MAX_CONSECUTIVE_HARD_DAYS;
-}
-
-export interface PlacementResult {
-  slots: DaySlot[];
-  /** Wünsche, für die kein Tag gefunden wurde. */
-  unplaced: SessionTypeKey[];
-}
-
-/** Was tatsächlich platziert wurde — nötig, um später aufwerten zu können. */
-interface Assignment {
-  candidate: Candidate;
-  slotIndex: number;
-  type: SessionTypeKey;
 }
 
 /**
@@ -349,18 +343,19 @@ interface Assignment {
  */
 function sameTypeAdjacent(slots: DaySlot[], index: number, type: SessionTypeKey): boolean {
   return (
-    (index > 0 && slots[index - 1].assigned === type) ||
-    (index < slots.length - 1 && slots[index + 1].assigned === type)
+    (index > 0 && slots[index - 1].assigned.includes(type)) ||
+    (index < slots.length - 1 && slots[index + 1].assigned.includes(type))
   );
 }
 
-/** Erster passender Tag für diesen Typ, nach Best-Fit sortiert. */
+/** Erster passender freier Tag für diesen Typ, nach Best-Fit sortiert. */
 function findSlot(slots: DaySlot[], type: SessionTypeKey, preferHigher: boolean): number | null {
   const eligible = slots
     .map((slot, index) => ({ slot, index }))
     .filter(
       ({ slot, index }) =>
-        slot.assigned === null &&
+        !slot.frozen &&
+        slot.assigned.length === 0 &&
         capacityAllows(slot.day.capacity, type) &&
         !sameTypeAdjacent(slots, index, type) &&
         hardBlockOk(slots, index, type),
@@ -376,21 +371,81 @@ function findSlot(slots: DaySlot[], type: SessionTypeKey, preferHigher: boolean)
 }
 
 /**
+ * Sucht einen Doppeltag: ein freier Tag, auf dem bereits genau eine Einheit der
+ * **anderen** Disziplin liegt.
+ *
+ * Ausdrücklich nur als Ausweg gedacht — zwei Einheiten an einem Tag sind die
+ * Ausnahme, nicht der Normalfall. Deshalb höchstens einer pro Zyklus, nur an
+ * Tagen voller Kapazität und nie zweimal Laufen oder zweimal Kraft.
+ */
+function findDoubleSlot(slots: DaySlot[], type: SessionTypeKey): number | null {
+  const meta = SESSION_TYPES[type];
+  if (meta.discipline === 'mobility') return null;
+
+  const candidates = slots
+    .map((slot, index) => ({ slot, index }))
+    .filter(({ slot, index }) => {
+      if (slot.frozen) return false;
+      if (slot.day.capacity !== 'full') return false;
+      if (slot.assigned.length !== 1) return false;
+      if (!capacityAllows(slot.day.capacity, type)) return false;
+
+      const existing = SESSION_TYPES[slot.assigned[0]];
+      // Eine Kraft- und eine Laufeinheit — nie zwei gleiche Disziplinen.
+      if (existing.discipline === meta.discipline) return false;
+      if (existing.discipline === 'mobility') return false;
+
+      return !sameTypeAdjacent(slots, index, type) && hardBlockOk(slots, index, type);
+    })
+    .sort((a, b) => a.slot.day.date.localeCompare(b.slot.day.date));
+
+  return candidates.length > 0 ? candidates[0].index : null;
+}
+
+export interface PlacementResult {
+  slots: DaySlot[];
+  /** Wünsche, für die kein Tag gefunden wurde. */
+  unplaced: SessionTypeKey[];
+  /** Datum des Doppeltags, falls einer gebraucht wurde. */
+  doubleDay: IsoDate | null;
+}
+
+/** Was tatsächlich platziert wurde — nötig, um später aufwerten zu können. */
+interface Assignment {
+  candidate: Candidate;
+  slotIndex: number;
+  type: SessionTypeKey;
+}
+
+/**
  * Verteilt die Wünsche auf die Tage des Zyklus.
  *
- * Zwei Durchgänge:
+ * Drei Durchgänge:
  *
  * 1. **Best-Fit** — unter den möglichen Tagen gewinnt der mit der niedrigsten
  *    ausreichenden Kapazität. So bleiben die vollen Tage für das frei, was sie
  *    wirklich braucht.
  * 2. **Aufwerten** — musste ein Wunsch auf einen Ersatztyp ausweichen (etwa
  *    "Kraft kurz" statt "Kraft Unterkörper") und ist danach doch noch ein
- *    besserer Tag frei geblieben, zieht die Session dorthin um und bekommt
- *    ihre volle Form zurück. Ohne diesen Durchgang läge eine abgespeckte
- *    Einheit am 12-Stunden-Schichttag, während der freie Tag ungenutzt bleibt.
+ *    besserer Tag frei geblieben, zieht die Session dorthin um und bekommt ihre
+ *    volle Form zurück.
+ * 3. **Doppeltag** — bleibt danach noch etwas übrig oder steckt in einer
+ *    verkürzten Form fest, darf einmal pro Zyklus ein freier Tag zwei Einheiten
+ *    tragen: eine Kraft- und eine Laufeinheit.
  */
-export function placeCandidates(days: ResolvedShiftDay[], candidates: Candidate[]): PlacementResult {
-  const slots: DaySlot[] = days.map((day) => ({ day, assigned: null }));
+export function placeCandidates(
+  days: ResolvedShiftDay[],
+  candidates: Candidate[],
+  allowDoubleDay: boolean,
+  /** Vortag mit dem, was dort liegt — nur als Kontext für die Nachbarregeln. */
+  previousDay?: { day: ResolvedShiftDay; assigned: SessionTypeKey[] },
+): PlacementResult {
+  const slots: DaySlot[] = [
+    ...(previousDay
+      ? [{ day: previousDay.day, assigned: previousDay.assigned, frozen: true }]
+      : []),
+    ...days.map((day) => ({ day, assigned: [] as SessionTypeKey[], frozen: false })),
+  ];
   const unplaced: SessionTypeKey[] = [];
   const assignments: Assignment[] = [];
 
@@ -402,7 +457,7 @@ export function placeCandidates(days: ResolvedShiftDay[], candidates: Candidate[
     for (const type of options) {
       const index = findSlot(slots, type, false);
       if (index !== null) {
-        slots[index].assigned = type;
+        slots[index].assigned.push(type);
         assignments.push({ candidate, slotIndex: index, type });
         placed = true;
         break;
@@ -425,21 +480,52 @@ export function placeCandidates(days: ResolvedShiftDay[], candidates: Candidate[
 
       // Tag vorübergehend freigeben, damit die Blockprüfung nicht die eigene
       // Session mitzählt.
-      slots[assignment.slotIndex].assigned = null;
+      const held = slots[assignment.slotIndex].assigned;
+      slots[assignment.slotIndex].assigned = held.filter((t) => t !== assignment.type);
       const target = findSlot(slots, better, true);
 
       if (target !== null && CAPACITY_RANK[slots[target].day.capacity] > currentCapacity) {
-        slots[target].assigned = better;
+        slots[target].assigned.push(better);
         assignment.slotIndex = target;
         assignment.type = better;
         break;
       }
 
-      slots[assignment.slotIndex].assigned = assignment.type;
+      slots[assignment.slotIndex].assigned = held;
     }
   }
 
-  return { slots, unplaced };
+  // Durchgang 3: Doppeltag als letzter Ausweg.
+  let doubleDay: IsoDate | null = null;
+  if (allowDoubleDay) {
+    // Erst das, was gar keinen Platz gefunden hat.
+    for (let i = unplaced.length - 1; i >= 0 && doubleDay === null; i--) {
+      const index = findDoubleSlot(slots, unplaced[i]);
+      if (index !== null) {
+        slots[index].assigned.push(unplaced[i]);
+        doubleDay = slots[index].day.date;
+        unplaced.splice(i, 1);
+      }
+    }
+
+    // Dann das, was nur in verkürzter Form untergekommen ist.
+    for (const assignment of assignments) {
+      if (doubleDay !== null) break;
+      if (assignment.type === assignment.candidate.primary) continue;
+
+      const index = findDoubleSlot(slots, assignment.candidate.primary);
+      if (index === null) continue;
+
+      const from = slots[assignment.slotIndex];
+      from.assigned = from.assigned.filter((t) => t !== assignment.type);
+      slots[index].assigned.push(assignment.candidate.primary);
+      assignment.slotIndex = index;
+      assignment.type = assignment.candidate.primary;
+      doubleDay = slots[index].day.date;
+    }
+  }
+
+  return { slots: slots.filter((slot) => !slot.frozen), unplaced, doubleDay };
 }
 
 /* ------------------------------------------------------------------ */
@@ -453,6 +539,8 @@ export interface GeneratedPlan {
   sessions: Session[];
   /** Wünsche, die in keinem Zyklus untergebracht werden konnten. */
   unplaced: Array<{ cycleStart: IsoDate; type: SessionTypeKey }>;
+  /** Tage, an denen ausnahmsweise zwei Einheiten liegen. */
+  doubleDays: IsoDate[];
 }
 
 export interface PlanInput {
@@ -503,6 +591,7 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
   const microcycles: Microcycle[] = [];
   const sessions: Session[] = [];
   const unplaced: GeneratedPlan['unplaced'] = [];
+  const doubleDays: IsoDate[] = [];
 
   let state = initialPlanState();
   // Der erste Zyklus beginnt heute und ist deshalb oft angebrochen.
@@ -563,6 +652,11 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
       };
 
       const days = resolveShiftRange(cursor, cycleEnd, ctx);
+      const previousDate = addDays(cursor, -1);
+      const previousDay = {
+        day: resolveShiftRange(previousDate, previousDate, ctx)[0],
+        assigned: sessions.filter((s) => s.date === previousDate).map((s) => s.type),
+      };
       const built = buildCandidates(
         state,
         settings.weeklyTargets,
@@ -574,41 +668,57 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
       );
       state = built.state;
 
-      const placement = placeCandidates(days, built.candidates);
+      const placement = placeCandidates(
+        days,
+        built.candidates,
+        settings.allowDoubleDayPerCycle && !isDeload,
+        previousDay,
+      );
       for (const type of placement.unplaced) {
         unplaced.push({ cycleStart: cursor, type });
       }
+      if (placement.doubleDay) doubleDays.push(placement.doubleDay);
 
       for (const slot of placement.slots) {
-        if (slot.assigned === null) continue;
-        const meta = SESSION_TYPES[slot.assigned];
-        const deloadFactor = isDeload ? 0.6 : 1;
-        const plan = buildSessionPlan(slot.assigned, settings.hrZones, isDeload);
+        // An einem Doppeltag zuerst die Laufeinheit, dann Kraft: mit frischen
+        // Beinen läuft es sich besser, und die Kraft leidet weniger darunter.
+        const ordered = [...slot.assigned].sort(
+          (a, b) =>
+            (SESSION_TYPES[a].discipline === 'run' ? 0 : 1) -
+            (SESSION_TYPES[b].discipline === 'run' ? 0 : 1),
+        );
 
-        sessions.push({
-          id: newId('ses'),
-          microcycleId: micro.id,
-          date: slot.day.date,
-          discipline: meta.discipline,
-          type: slot.assigned,
-          title: sessionTitle(slot.assigned, isDeload),
-          plannedDurationMin: plan.durationMin,
-          plannedDistanceKm: null,
-          zone: meta.defaultZone,
-          targetRpe: isDeload ? Math.max(2, meta.defaultRpe - 2) : meta.defaultRpe,
-          isKey: meta.isKey && !isDeload,
-          load: Math.round(meta.load * deloadFactor * 10) / 10,
-          content: plan.content,
-          status: 'planned',
-          originalDate: null,
-          rescheduleReason: null,
-          locked: false,
-          manuallyEdited: false,
-          createdAt: ts,
-          updatedAt: ts,
+        ordered.forEach((type, orderIndex) => {
+          const meta = SESSION_TYPES[type];
+          const deloadFactor = isDeload ? 0.6 : 1;
+          const plan = buildSessionPlan(type, settings.hrZones, isDeload);
+
+          sessions.push({
+            id: newId('ses'),
+            microcycleId: micro.id,
+            date: slot.day.date,
+            orderInDay: orderIndex + 1,
+            discipline: meta.discipline,
+            type,
+            title: sessionTitle(type, isDeload),
+            plannedDurationMin: plan.durationMin,
+            plannedDistanceKm: null,
+            zone: meta.defaultZone,
+            targetRpe: isDeload ? Math.max(2, meta.defaultRpe - 2) : meta.defaultRpe,
+            isKey: meta.isKey && !isDeload,
+            load: Math.round(meta.load * deloadFactor * 10) / 10,
+            content: plan.content,
+            status: 'planned',
+            originalDate: null,
+            rescheduleReason: null,
+            locked: false,
+            manuallyEdited: false,
+            createdAt: ts,
+            updatedAt: ts,
+          });
+
+          micro.plannedLoad += Math.round(meta.load * deloadFactor * 10) / 10;
         });
-
-        micro.plannedLoad += Math.round(meta.load * deloadFactor * 10) / 10;
       }
 
       micro.plannedLoad = Math.round(micro.plannedLoad * 10) / 10;
@@ -624,5 +734,5 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
 
   macrocycle.endDate = addDays(cursor, -1);
 
-  return { macrocycle, mesocycles, microcycles, sessions, unplaced };
+  return { macrocycle, mesocycles, microcycles, sessions, unplaced, doubleDays };
 }

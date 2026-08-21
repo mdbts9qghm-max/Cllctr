@@ -20,10 +20,10 @@ export default function HeutePage() {
     return <p className="text-sm text-ink-faint">Lade …</p>;
   }
 
-  const session =
-    todaySessions.find((s) => s.status === 'planned') ??
-    todaySessions.find((s) => s.status === 'done') ??
-    null;
+  // An einem Doppeltag zuerst die Laufeinheit.
+  const sessions = todaySessions
+    .filter((s) => s.status === 'planned' || s.status === 'done')
+    .sort((a, b) => (a.discipline === 'run' ? 0 : 1) - (b.discipline === 'run' ? 0 : 1));
 
   const day = resolveShiftDay(today(), ctx);
   const possible = allowedSessionTypes(day.capacity);
@@ -54,32 +54,42 @@ export default function HeutePage() {
 
           <p className="text-sm leading-relaxed text-ink-muted">{capacityExplanation(day)}</p>
 
-          {session ? (
+          {sessions.length > 0 ? (
             <div className="mt-4 border-t border-line pt-3">
               <p className="mb-1.5 text-[11px] uppercase tracking-widest text-ember">
-                Heute dran{session.status === 'done' ? ' · erledigt' : ''}
+                Heute dran
+                {sessions.length > 1 ? ' · Doppeltag' : ''}
               </p>
-              <p className="text-base font-medium text-ink">
-                {session.title}
-                {session.isKey ? <span className="text-ember"> ▪</span> : null}
-              </p>
-              <p className="mb-2 text-xs text-ink-faint tabular">
-                {session.plannedDurationMin} Min
-                {session.zone ? ` · Zone ${session.zone}` : ''}
-                {session.targetRpe ? ` · RPE ${session.targetRpe}` : ''}
-              </p>
-              <ul className="space-y-0.5">
-                {session.content.map((block, i) => (
-                  <li key={i} className="text-sm leading-relaxed text-ink-muted">
-                    <span className="text-ink-faint">{block.label}:</span> {block.detail}
-                  </li>
-                ))}
-              </ul>
-              {session.rescheduleReason ? (
-                <p className="mt-2 text-xs leading-relaxed text-ink-faint">
-                  {session.rescheduleReason}
-                </p>
-              ) : null}
+
+              {sessions.map((session, i) => (
+                <div key={session.id} className={i > 0 ? 'mt-4 border-t border-line pt-3' : ''}>
+                  <p className="text-base font-medium text-ink">
+                    {session.title}
+                    {session.isKey ? <span className="text-ember"> ▪</span> : null}
+                    {session.status === 'done' ? (
+                      <span className="ml-2 text-xs text-ok">erledigt</span>
+                    ) : null}
+                  </p>
+                  <p className="mb-2 text-xs text-ink-faint tabular">
+                    {session.plannedDurationMin} Min
+                    {session.zone ? ` · Zone ${session.zone}` : ''}
+                    {session.targetRpe ? ` · RPE ${session.targetRpe}` : ''}
+                  </p>
+                  <ul className="space-y-0.5">
+                    {session.content.map((block, bi) => (
+                      <li key={bi} className="text-sm leading-relaxed text-ink-muted">
+                        <span className="text-ink-faint">{block.label}:</span> {block.detail}
+                      </li>
+                    ))}
+                  </ul>
+                  {session.rescheduleReason ? (
+                    <p className="mt-2 text-xs leading-relaxed text-ink-faint">
+                      {session.rescheduleReason}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+
               <p className="mt-3">
                 <Link href="/plan" className="text-sm text-ember underline">
                   Im Plan öffnen

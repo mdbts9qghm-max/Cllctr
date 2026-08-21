@@ -12,7 +12,7 @@ export type IsoDate = string;
 export type IsoDateTime = string;
 
 /** Version des Schemas im Export. Wird bei jeder Änderung am Modell hochgezählt. */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 /* ------------------------------------------------------------------ */
 /* Schicht                                                             */
@@ -146,11 +146,18 @@ export interface SessionTypeMeta {
   minCapacity: TrainingCapacity;
   /**
    * Belastungsgewicht 1–10. Basis für Wochenlast und Deload-Erkennung.
-   * Ab 7 gilt eine Session als "hart" und fällt unter die Regel, dass nicht zu
-   * viele harte Tage aufeinanderfolgen dürfen. Gemeint ist systemische und
-   * Bein-Ermüdung — reines Oberkörpertraining liegt deshalb darunter.
+   * Sagt nichts darüber aus, ob der Tag als "hart" zählt — das ist
+   * countsAsHardDay.
    */
   load: number;
+  /**
+   * Zählt für die Regel "keine zwei harten Tage in Folge".
+   *
+   * Bewusst getrennt von load: Krafttraining ist anstrengend, aber es
+   * blockiert den Folgetag nicht so wie eine harte Laufeinheit. Nur Intervalle,
+   * Tempolauf und Long Run zählen deshalb als harter Tag.
+   */
+  countsAsHardDay: boolean;
   /** Standarddauer in Minuten, wenn der Generator nichts Besseres weiß. */
   defaultDurationMin: number;
   /** Ziel-HF-Zone 1–5, null bei Kraft/Mobility. */
@@ -165,6 +172,7 @@ export const SESSION_TYPES: Record<SessionTypeKey, SessionTypeMeta> = {
     discipline: 'run',
     isKey: true,
     minCapacity: 'full',
+    countsAsHardDay: true,
     load: 9,
     defaultDurationMin: 60,
     defaultZone: 4,
@@ -176,6 +184,7 @@ export const SESSION_TYPES: Record<SessionTypeKey, SessionTypeMeta> = {
     discipline: 'run',
     isKey: true,
     minCapacity: 'full',
+    countsAsHardDay: true,
     load: 7,
     defaultDurationMin: 50,
     defaultZone: 3,
@@ -187,6 +196,7 @@ export const SESSION_TYPES: Record<SessionTypeKey, SessionTypeMeta> = {
     discipline: 'run',
     isKey: true,
     minCapacity: 'full',
+    countsAsHardDay: true,
     load: 8,
     defaultDurationMin: 90,
     defaultZone: 2,
@@ -198,6 +208,7 @@ export const SESSION_TYPES: Record<SessionTypeKey, SessionTypeMeta> = {
     discipline: 'run',
     isKey: false,
     minCapacity: 'moderate',
+    countsAsHardDay: false,
     load: 4,
     defaultDurationMin: 45,
     defaultZone: 2,
@@ -209,6 +220,7 @@ export const SESSION_TYPES: Record<SessionTypeKey, SessionTypeMeta> = {
     discipline: 'run',
     isKey: false,
     minCapacity: 'light',
+    countsAsHardDay: false,
     load: 2,
     defaultDurationMin: 30,
     defaultZone: 1,
@@ -224,6 +236,7 @@ export const SESSION_TYPES: Record<SessionTypeKey, SessionTypeMeta> = {
     // beeinträchtigt weder den Lauf noch die Beinarbeit am Folgetag. Läge der
     // Wert darüber, würde die Regel gegen zwei harte Tage in Folge diese Einheit
     // dauerhaft blockieren — die beiden freien Tage liegen ja nebeneinander.
+    countsAsHardDay: false,
     load: 6,
     defaultDurationMin: 60,
     defaultZone: null,
@@ -235,6 +248,7 @@ export const SESSION_TYPES: Record<SessionTypeKey, SessionTypeMeta> = {
     discipline: 'strength',
     isKey: true,
     minCapacity: 'full',
+    countsAsHardDay: false,
     load: 9,
     defaultDurationMin: 65,
     defaultZone: null,
@@ -246,6 +260,7 @@ export const SESSION_TYPES: Record<SessionTypeKey, SessionTypeMeta> = {
     discipline: 'strength',
     isKey: true,
     minCapacity: 'moderate',
+    countsAsHardDay: false,
     load: 7,
     defaultDurationMin: 55,
     defaultZone: null,
@@ -257,6 +272,7 @@ export const SESSION_TYPES: Record<SessionTypeKey, SessionTypeMeta> = {
     discipline: 'strength',
     isKey: false,
     minCapacity: 'light',
+    countsAsHardDay: false,
     load: 4,
     defaultDurationMin: 35,
     defaultZone: null,
@@ -268,6 +284,7 @@ export const SESSION_TYPES: Record<SessionTypeKey, SessionTypeMeta> = {
     discipline: 'mobility',
     isKey: false,
     minCapacity: 'light',
+    countsAsHardDay: false,
     load: 1,
     defaultDurationMin: 25,
     defaultZone: null,
@@ -367,6 +384,11 @@ export interface Session {
   id: string;
   microcycleId: string;
   date: IsoDate;
+  /**
+   * Position innerhalb des Tages, 1-basiert. Normalerweise 1 — an einem
+   * Doppeltag gibt es zusätzlich eine 2.
+   */
+  orderInDay: number;
   discipline: Discipline;
   type: SessionTypeKey;
   title: string;
@@ -576,6 +598,12 @@ export interface Settings {
    * ein Kraftziel von 3×/Woche mit dieser Rotation nicht erreichen.
    */
   allowStrengthOnLightDays: boolean;
+  /**
+   * Erlaubt höchstens einen Doppeltag pro Zyklus: zwei Einheiten an einem
+   * freien Tag, immer eine Kraft- und eine Laufeinheit. Wird nur als Ausweg
+   * genutzt, wenn sonst etwas ausfallen oder verkürzt werden müsste.
+   */
+  allowDoubleDayPerCycle: boolean;
   /** Zyklen pro Mesozyklus: Belastung und anschließender Deload. */
   mesoLoadCycles: number;
   mesoDeloadCycles: number;

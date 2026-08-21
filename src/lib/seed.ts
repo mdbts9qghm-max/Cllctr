@@ -125,6 +125,7 @@ export function defaultSettings(): Settings {
     weeklyTargets: { strength: 3, run: 2, optional: 1 },
     planningProfile: 'runFirst',
     allowStrengthOnLightDays: true,
+    allowDoubleDayPerCycle: true,
     mesoLoadCycles: 4,
     mesoDeloadCycles: 1,
     minHoursBetweenKeySessions: 24,

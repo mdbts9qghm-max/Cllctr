@@ -58,11 +58,24 @@ export default function PlanPage() {
         settings,
         mesocycleCount: MESOCYCLE_COUNT,
       });
-      setMessage(
-        result.unplaced.length > 0
-          ? `Plan erzeugt. ${result.unplaced.length} Einheiten fanden keinen Tag — die Rotation gibt in diesen Zyklen nicht mehr her.`
-          : `Plan erzeugt: ${result.sessions.length} Einheiten über ${result.microcycles.length} Zyklen.`,
-      );
+      const parts = [
+        `Plan erzeugt: ${result.sessions.length} Einheiten über ${result.microcycles.length} Zyklen.`,
+      ];
+      if (result.doubleDays.length > 0) {
+        const n = result.doubleDays.length;
+        parts.push(
+          `${n} ${n === 1 ? 'Doppeltag' : 'Doppeltage'} nötig — dort liegen Laufen und Kraft am selben freien Tag.`,
+        );
+      }
+      if (result.unplaced.length > 0) {
+        const n = result.unplaced.length;
+        parts.push(
+          n === 1
+            ? 'Eine Einheit fand keinen Tag; die Rotation gibt in diesem Zyklus nicht mehr her.'
+            : `${n} Einheiten fanden keinen Tag; die Rotation gibt in diesen Zyklen nicht mehr her.`,
+        );
+      }
+      setMessage(parts.join(' '));
     } finally {
       setBusy(false);
     }
@@ -200,8 +213,17 @@ export default function PlanPage() {
       >
         <div className="space-y-5">
           {plan.micros.map((micro, i) => {
-            const list = (sessionsByMicro.get(micro.id) ?? []).sort((a, b) =>
-              a.date.localeCompare(b.date),
+            // An einem Doppeltag steht die Laufeinheit oben: mit frischen Beinen
+            // läuft es sich besser.
+            const list = (sessionsByMicro.get(micro.id) ?? []).sort(
+              (a, b) =>
+                a.date.localeCompare(b.date) ||
+                (a.discipline === 'run' ? 0 : 1) - (b.discipline === 'run' ? 0 : 1),
+            );
+            const doubleDates = new Set(
+              list
+                .map((s) => s.date)
+                .filter((d, i, all) => all.indexOf(d) !== i),
             );
             const isActive = micro.id === activeMicro?.id;
 
@@ -222,10 +244,12 @@ export default function PlanPage() {
                     <p className="text-xs text-ink-faint">Keine Einheiten in diesem Zyklus.</p>
                   ) : null}
 
-                  {list.map((session) => {
+                  {list.map((session, si) => {
                     const day = resolveShiftDay(session.date, ctx);
                     const open = openId === session.id;
                     const dimmed = session.status === 'skipped' || session.status === 'missed';
+                    const isDouble = doubleDates.has(session.date);
+                    const isSecond = si > 0 && list[si - 1].date === session.date;
 
                     return (
                       <div key={session.id}>
@@ -244,11 +268,23 @@ export default function PlanPage() {
                             {day.shiftType.short}
                           </span>
                           <span className="w-16 shrink-0 text-xs text-ink-muted tabular">
-                            {weekdayShort(session.date)} {session.date.slice(8)}.{session.date.slice(5, 7)}.
+                            {isSecond ? (
+                              <span className="text-ember">↳ dazu</span>
+                            ) : (
+                              <>
+                                {weekdayShort(session.date)} {session.date.slice(8)}.
+                                {session.date.slice(5, 7)}.
+                              </>
+                            )}
                           </span>
                           <span className="flex-1 truncate text-sm text-ink">
                             {session.title}
                             {session.isKey ? <span className="text-ember"> ▪</span> : null}
+                            {isDouble && !isSecond ? (
+                              <span className="ml-1 text-[10px] uppercase tracking-wider text-ember">
+                                Doppeltag
+                              </span>
+                            ) : null}
                           </span>
                           <span className="shrink-0 text-[11px] text-ink-faint tabular">
                             {session.plannedDurationMin} Min

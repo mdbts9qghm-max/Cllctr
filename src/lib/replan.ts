@@ -37,9 +37,14 @@ import {
   type Settings,
 } from './types';
 
-/** Ab diesem Belastungswert gilt ein Tag als hart (siehe SessionTypeMeta.load). */
+/** Ab diesem Belastungswert gilt eine Einheit als zu wertvoll zum Verdrängen. */
 const HARD_LOAD_THRESHOLD = 7;
-const MAX_CONSECUTIVE_HARD_DAYS = 2;
+
+/**
+ * Keine zwei harten Tage in Folge. Als hart zählen nur harte Laufeinheiten
+ * (SessionTypeMeta.countsAsHardDay) — Krafttraining nicht.
+ */
+const MAX_CONSECUTIVE_HARD_DAYS = 1;
 
 /**
  * Reduzierte Ersatzformen, in Rangfolge. Bekommt eine Key-Session keinen vollen
@@ -60,6 +65,8 @@ export interface RescheduleMove {
   fromDate: IsoDate;
   toDate: IsoDate;
   reason: string;
+  /** Die Einheit landet als zweite an einem ohnehin belegten Tag. */
+  isDouble: boolean;
   /** Gesetzt, wenn die Einheit nur in reduzierter Form untergebracht wurde. */
   newType: SessionTypeKey | null;
   newTitle: string | null;
@@ -111,6 +118,8 @@ interface Placement {
   day: ResolvedShiftDay;
   type: SessionTypeKey;
   reduced: boolean;
+  /** Zweite Einheit an einem ohnehin belegten freien Tag. */
+  isDouble: boolean;
   displacedFillers: Session[];
   displacedKeys: Session[];
 }
@@ -118,6 +127,10 @@ interface Placement {
 interface SearchOptions {
   /** Darf diese Einheit eine Key-Session verdrängen? */
   allowDisplaceKeys: boolean;
+  /** Darf sie als zweite Einheit auf einen belegten freien Tag? */
+  allowDoubleDay: boolean;
+  /** Nur die volle Form versuchen, keine reduzierten Ersatzformen. */
+  fullFormOnly: boolean;
   /** Ids, die bei der Belegungsprüfung ignoriert werden (bereits verschoben). */
   ignoreIds: Set<string>;
 }
@@ -140,11 +153,11 @@ function hardBlockOk(
   byDate: Map<IsoDate, Session[]>,
   ignoreIds: Set<string>,
 ): boolean {
-  if (SESSION_TYPES[type].load < HARD_LOAD_THRESHOLD) return true;
+  if (!SESSION_TYPES[type].countsAsHardDay) return true;
 
   const hardOn = (d: IsoDate) =>
     (byDate.get(d) ?? []).some(
-      (s) => !ignoreIds.has(s.id) && s.load >= HARD_LOAD_THRESHOLD,
+      (s) => !ignoreIds.has(s.id) && SESSION_TYPES[s.type].countsAsHardDay,
     );
 
   let run = 1;
@@ -175,7 +188,14 @@ function findPlacement(
   const ignore = new Set([session.id, ...options.ignoreIds]);
   const keyBlockers: string[] = [];
 
-  const forms: SessionTypeKey[] = [session.type, ...(DOWNGRADES[session.type] ?? [])];
+  const forms: SessionTypeKey[] = options.fullFormOnly
+    ? [session.type]
+    : [session.type, ...(DOWNGRADES[session.type] ?? [])];
+
+  // Liegt im Fenster schon irgendwo ein Doppeltag, kommt kein zweiter dazu.
+  const doubleAlreadyUsed = days.some(
+    (d) => (byDate.get(d.date) ?? []).filter((s) => !ignore.has(s.id)).length > 1,
+  );
 
   for (let formIndex = 0; formIndex < forms.length; formIndex++) {
     const form = forms[formIndex];
@@ -191,6 +211,42 @@ function findPlacement(
 
       const keys = onDay.filter((s) => s.isKey || s.load >= HARD_LOAD_THRESHOLD);
       const fillers = onDay.filter((s) => !keys.includes(s));
+
+      // Dieselbe Einheit nicht an zwei aufeinanderfolgenden Tagen — dieselbe
+      // Muskulatur bekäme sonst keine 24 Stunden Erholung.
+      const sameTypeNeighbour = [addDays(day.date, -1), addDays(day.date, 1)].some((d) =>
+        (byDate.get(d) ?? []).some((s) => !ignore.has(s.id) && s.type === form),
+      );
+      if (sameTypeNeighbour) continue;
+
+      if (!hardBlockOk(day.date, form, byDate, ignore)) continue;
+
+      // Variante Doppeltag: der Tag ist belegt, aber voll belastbar und trägt
+      // genau eine Einheit der anderen Disziplin. Nichts geht verloren.
+      if (options.allowDoubleDay) {
+        const fitsAsDouble =
+          !doubleAlreadyUsed &&
+          day.capacity === 'full' &&
+          onDay.length === 1 &&
+          onDay[0].discipline !== session.discipline &&
+          onDay[0].discipline !== 'mobility' &&
+          session.discipline !== 'mobility';
+
+        if (fitsAsDouble) {
+          return {
+            placement: {
+              day,
+              type: form,
+              reduced: formIndex > 0,
+              isDouble: true,
+              displacedFillers: [],
+              displacedKeys: [],
+            },
+            keyBlockers,
+          };
+        }
+        continue;
+      }
 
       if (keys.length > 0) {
         if (formIndex === 0) keyBlockers.push(`${formatShort(day.date)} ${keys[0].title}`);
@@ -208,20 +264,12 @@ function findPlacement(
       // Gleichwertiges steht — sonst tauscht man Gleiches gegen Gleiches.
       if (formIndex > 0 && onDay.some((s) => s.load >= meta.load)) continue;
 
-      // Dieselbe Einheit nicht an zwei aufeinanderfolgenden Tagen — dieselbe
-      // Muskulatur bekäme sonst keine 24 Stunden Erholung.
-      const sameTypeNeighbour = [addDays(day.date, -1), addDays(day.date, 1)].some((d) =>
-        (byDate.get(d) ?? []).some((s) => !ignore.has(s.id) && s.type === form),
-      );
-      if (sameTypeNeighbour) continue;
-
-      if (!hardBlockOk(day.date, form, byDate, ignore)) continue;
-
       return {
         placement: {
           day,
           type: form,
           reduced: formIndex > 0,
+          isDouble: false,
           displacedFillers: fillers,
           displacedKeys: keys,
         },
@@ -231,6 +279,42 @@ function findPlacement(
   }
 
   return { placement: null, keyBlockers };
+}
+
+/**
+ * Sucht in mehreren Anläufen, vom Besten zum Notbehelf:
+ *
+ *   1. volle Form auf einem freien Tag — verliert nichts
+ *   2. volle Form als zweite Einheit an einem freien Tag — verliert ebenfalls
+ *      nichts, kostet aber einen Doppeltag
+ *   3. volle Form, dafür weicht eine Einheit nach Planungsprofil
+ *   4. reduzierte Form auf einem freien Tag
+ */
+function searchPlacement(
+  session: Session,
+  working: Session[],
+  ctx: RescheduleContext,
+  ignoreIds: Set<string>,
+  allowDisplaceKeys: boolean,
+): { placement: Placement | null; keyBlockers: string[] } {
+  const attempts: SearchOptions[] = [
+    { allowDisplaceKeys: false, allowDoubleDay: false, fullFormOnly: true, ignoreIds },
+    ...(ctx.settings.allowDoubleDayPerCycle
+      ? [{ allowDisplaceKeys: false, allowDoubleDay: true, fullFormOnly: true, ignoreIds }]
+      : []),
+    ...(allowDisplaceKeys
+      ? [{ allowDisplaceKeys: true, allowDoubleDay: false, fullFormOnly: true, ignoreIds }]
+      : []),
+    { allowDisplaceKeys: false, allowDoubleDay: false, fullFormOnly: false, ignoreIds },
+  ];
+
+  let blockers: string[] = [];
+  for (const options of attempts) {
+    const result = findPlacement(session, working, ctx, options);
+    if (result.placement) return result;
+    if (result.keyBlockers.length > blockers.length) blockers = result.keyBlockers;
+  }
+  return { placement: null, keyBlockers: blockers };
 }
 
 /* ------------------------------------------------------------------ */
@@ -245,6 +329,7 @@ function moveFor(session: Session, placement: Placement, reason: string): Resche
     fromDate: session.date,
     toDate: placement.day.date,
     reason,
+    isDouble: placement.isDouble,
     newType: placement.reduced ? placement.type : null,
     newTitle: placement.reduced ? meta.label : null,
     newDurationMin: placement.reduced ? meta.defaultDurationMin : null,
@@ -254,6 +339,12 @@ function moveFor(session: Session, placement: Placement, reason: string): Resche
 
 function placementReason(session: Session, placement: Placement): string {
   const meta = SESSION_TYPES[placement.type];
+  if (placement.isDouble) {
+    return (
+      `${formatShort(placement.day.date)} ist ${placement.day.shiftType.name} und schon belegt — ` +
+      `die ${session.title} kommt als zweite Einheit dazu. So geht nichts verloren.`
+    );
+  }
   if (placement.reduced) {
     return (
       `${formatShort(placement.day.date)} ist ${placement.day.shiftType.name} und trägt keine volle ` +
@@ -296,10 +387,7 @@ export function proposeReschedule(missed: Session, ctx: RescheduleContext): Resc
   const moves: RescheduleMove[] = [];
   const drops: RescheduleDrop[] = [];
 
-  const primary = findPlacement(missed, working, ctx, {
-    allowDisplaceKeys: true,
-    ignoreIds: new Set(),
-  });
+  const primary = searchPlacement(missed, working, ctx, new Set(), true);
 
   if (!primary.placement) {
     const blockerNote =
@@ -345,10 +433,7 @@ export function proposeReschedule(missed: Session, ctx: RescheduleContext): Resc
   // Verdrängte Key-Sessions bekommen selbst noch eine Chance — aber sie dürfen
   // ihrerseits niemanden verdrängen, sonst schiebt sich die Kette endlos fort.
   for (const key of place.displacedKeys) {
-    const sub = findPlacement(key, working, ctx, {
-      allowDisplaceKeys: false,
-      ignoreIds: new Set([missed.id]),
-    });
+    const sub = searchPlacement(key, working, ctx, new Set([missed.id]), false);
 
     if (sub.placement) {
       moves.push(
@@ -387,14 +472,24 @@ export function proposeReschedule(missed: Session, ctx: RescheduleContext): Resc
   }
 
   const parts: string[] = [];
-  parts.push(
-    place.reduced
-      ? `${missed.title} ist eine Key-Session und wird nicht einfach gestrichen. Ein voller Tag ist im ` +
-          `Fenster nicht frei, deshalb rückt sie als ${SESSION_TYPES[place.type].label} auf ` +
-          `${formatShort(place.day.date)}.`
-      : `${missed.title} ist eine Key-Session und wird nicht gestrichen, sondern auf ` +
-          `${formatShort(place.day.date)} verschoben.`,
-  );
+  if (place.isDouble) {
+    parts.push(
+      `${missed.title} ist eine Key-Session und wird nicht gestrichen. Ein leerer Tag ist im Fenster ` +
+        `nicht frei, deshalb wird ${formatShort(place.day.date)} zum Doppeltag: erst Laufen, dann ` +
+        `Kraft. Nichts fällt weg.`,
+    );
+  } else if (place.reduced) {
+    parts.push(
+      `${missed.title} ist eine Key-Session und wird nicht einfach gestrichen. Ein voller Tag ist im ` +
+        `Fenster nicht frei, deshalb rückt sie als ${SESSION_TYPES[place.type].label} auf ` +
+        `${formatShort(place.day.date)}.`,
+    );
+  } else {
+    parts.push(
+      `${missed.title} ist eine Key-Session und wird nicht gestrichen, sondern auf ` +
+        `${formatShort(place.day.date)} verschoben.`,
+    );
+  }
   if (place.displacedKeys.length > 0) {
     const profileName =
       ctx.settings.planningProfile === 'runFirst' ? 'Laufen hat Vorrang' : 'Kraft hat Vorrang';
@@ -424,6 +519,7 @@ export function applyRescheduleToSessions(sessions: Session[], plan: RescheduleP
       return {
         ...session,
         date: move.toDate,
+        orderInDay: move.isDouble ? 2 : 1,
         originalDate: session.originalDate ?? move.fromDate,
         status: 'planned' as const,
         rescheduleReason: move.reason,
