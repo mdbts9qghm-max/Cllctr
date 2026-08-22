@@ -9,6 +9,7 @@ import { capacityAllows, capacityExplanation, checkFeasibility, resolveShiftRang
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useSettings, useShiftContext } from '@/lib/hooks';
 import { CAPACITY_LABEL, CAPACITY_SHORT, type IsoDate } from '@/lib/types';
+import { ShiftPicker } from '@/components/ShiftPicker';
 import { Button, CapacityBadge, Card, Field, inputClass, Notice, Section } from '@/components/ui';
 
 const PREVIEW_DAYS = 21;
@@ -40,15 +41,6 @@ export default function SchichtPage() {
     return day !== undefined && !capacityAllows(day.capacity, session.type);
   });
   const round = (n: number) => Math.round(n * 10) / 10;
-
-  async function setOverride(date: IsoDate, shiftTypeId: string | null) {
-    if (shiftTypeId === null) {
-      await db.shiftOverrides.delete(date);
-    } else {
-      await db.shiftOverrides.put({ date, shiftTypeId, note: '', createdAt: now() });
-    }
-    setOpenDay(null);
-  }
 
   async function updateSequence(next: string[]) {
     if (!pattern) return;
@@ -232,28 +224,11 @@ export default function SchichtPage() {
                     <p className="mb-3 text-sm leading-relaxed text-ink-muted">
                       {capacityExplanation(day)}
                     </p>
-                    <p className="mb-2 text-xs uppercase tracking-widest text-ink-faint">
-                      Abweichend setzen
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {ctx!.shiftTypes.map((t) => (
-                        <button
-                          key={t.id}
-                          onClick={() => void setOverride(day.date, t.id)}
-                          className="rounded border border-line-strong px-2.5 py-1 text-sm text-ink hover:border-ember"
-                        >
-                          {t.name}
-                        </button>
-                      ))}
-                      {day.isOverride ? (
-                        <button
-                          onClick={() => void setOverride(day.date, null)}
-                          className="rounded border border-danger/50 px-2.5 py-1 text-sm text-danger"
-                        >
-                          Zurück zur Rotation
-                        </button>
-                      ) : null}
-                    </div>
+                    <ShiftPicker
+                      day={day}
+                      shiftTypes={ctx!.shiftTypes}
+                      onDone={() => setOpenDay(null)}
+                    />
                   </div>
                 ) : null}
               </div>

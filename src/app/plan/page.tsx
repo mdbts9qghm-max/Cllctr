@@ -5,7 +5,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 import { formatShort, today, weekdayShort } from '@/lib/dates';
 import { useSettings, useShiftContext } from '@/lib/hooks';
-import { capacityAllows, resolveShiftDay } from '@/lib/shifts';
+import { capacityAllows, capacityExplanation, resolveShiftDay, resolveShiftRange } from '@/lib/shifts';
 import {
   applyRescheduleProposal,
   buildRescheduleProposal,
@@ -18,6 +18,7 @@ import {
 import { PROGRESSING_TYPES, progresses } from '@/lib/progression';
 import type { ReschedulePlan } from '@/lib/replan';
 import { SESSION_STATUS_LABEL, type Session, type Soul } from '@/lib/types';
+import { ShiftPicker } from '@/components/ShiftPicker';
 import { Button, Card, Mark, Notice, Section } from '@/components/ui';
 import { NewRecordsNotice, SessionLogForm } from '@/components/SessionLogForm';
 
@@ -30,6 +31,10 @@ export default function PlanPage() {
   const [confirmRegenerate, setConfirmRegenerate] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
+  // Ruhetage klappen für sich auf; Trainingstage zeigen den Schichtwechsel im
+  // Detail der Einheit.
+  const [openRestDay, setOpenRestDay] = useState<string | null>(null);
+  const [shiftEditFor, setShiftEditFor] = useState<string | null>(null);
   const [loggingId, setLoggingId] = useState<string | null>(null);
   const [newRecords, setNewRecords] = useState<string[]>([]);
   const [newSouls, setNewSouls] = useState<Soul[]>([]);
@@ -266,7 +271,7 @@ export default function PlanPage() {
 
       <Section
         title="Plan"
-        hint="Ein Zyklus ist ein Durchlauf deiner Rotation. Tippe eine Einheit an für Inhalt und Aktionen."
+        hint="Ein Zyklus ist ein Durchlauf deiner Rotation. Jeder Tag steht in der Liste, auch die Ruhetage. Tippe einen Tag an — dort kannst du auch die Schicht ändern."
       >
         <div className="space-y-5">
           {plan.micros.map((micro, i) => {
@@ -278,6 +283,7 @@ export default function PlanPage() {
                 (a.discipline === 'run' ? 0 : 1) - (b.discipline === 'run' ? 0 : 1),
             );
             const isActive = micro.id === activeMicro?.id;
+            const cycleDays = resolveShiftRange(micro.startDate, micro.endDate, ctx);
 
             return (
               <div key={micro.id}>
@@ -292,15 +298,65 @@ export default function PlanPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  {list.length === 0 ? (
-                    <p className="text-xs text-ink-faint">Keine Einheiten in diesem Zyklus.</p>
-                  ) : null}
+                  {cycleDays.map((cycleDay) => {
+                    const daySessions = list.filter((x) => x.date === cycleDay.date);
 
-                  {list.map((session, si) => {
-                    const day = resolveShiftDay(session.date, ctx);
+                    // Ein Tag ohne Einheit ist kein Loch im Plan, sondern eine
+                    // Entscheidung. Ihn wegzulassen ließ den Plan lückenhaft
+                    // aussehen und verschwieg, warum an dem Tag nichts geht.
+                    if (daySessions.length === 0) {
+                      const openRest = openRestDay === cycleDay.date;
+                      return (
+                        <div key={cycleDay.date}>
+                          <button
+                            onClick={() => setOpenRestDay(openRest ? null : cycleDay.date)}
+                            className={`flex w-full items-center gap-3 rounded border border-dashed px-3 py-2 text-left transition-colors ${
+                              cycleDay.date === todayIso
+                                ? 'border-ember/60 bg-surface'
+                                : 'border-line bg-transparent hover:border-line-strong'
+                            }`}
+                          >
+                            <span
+                              className="flex size-6 shrink-0 items-center justify-center rounded text-[11px] font-bold text-void opacity-60"
+                              style={{ backgroundColor: cycleDay.shiftType.color }}
+                            >
+                              {cycleDay.shiftType.short}
+                            </span>
+                            <span className="w-16 shrink-0 text-xs text-ink-faint tabular">
+                              {weekdayShort(cycleDay.date)} {cycleDay.date.slice(8)}.
+                              {cycleDay.date.slice(5, 7)}.
+                            </span>
+                            <span className="min-w-0 flex-1 truncate text-sm text-ink-faint">
+                              {cycleDay.capacity === 'none' ? 'Kein Training' : 'Ruhetag'}
+                            </span>
+                            <span className="max-w-[40%] shrink-0 truncate text-[11px] text-ink-faint">
+                              {cycleDay.shiftType.name}
+                              {cycleDay.isOverride ? ' ∗' : ''}
+                            </span>
+                          </button>
+
+                          {openRest ? (
+                            <div className="mt-1 rounded border border-line-strong bg-surface-2 p-3">
+                              <p className="mb-3 text-sm leading-relaxed text-ink-muted">
+                                {capacityExplanation(cycleDay)}
+                              </p>
+                              <ShiftPicker
+                                day={cycleDay}
+                                shiftTypes={ctx.shiftTypes}
+                                onDone={() => setOpenRestDay(null)}
+                                label="Schicht an diesem Tag"
+                              />
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    }
+
+                    return daySessions.map((session, si) => {
+                    const day = cycleDay;
                     const open = openId === session.id;
                     const dimmed = session.status === 'skipped' || session.status === 'missed';
-                    const isSecond = si > 0 && list[si - 1].date === session.date;
+                    const isSecond = si > 0;
                     // Nach einer nachträglich geänderten Schicht kann eine
                     // geplante Einheit an einem Tag stehen, der sie nicht trägt.
                     const conflict =
@@ -399,6 +455,27 @@ export default function PlanPage() {
                               </p>
                             ) : null}
 
+                            {/* Die Schicht gehört zum Tag, nicht zur Einheit —
+                                aber genau hier fällt auf, dass sie nicht stimmt.
+                                Deshalb eingeklappt statt auf einem zweiten Screen. */}
+                            {shiftEditFor === session.date ? (
+                              <div className="mb-3 rounded border border-line bg-surface p-3">
+                                <ShiftPicker
+                                  day={day}
+                                  shiftTypes={ctx.shiftTypes}
+                                  onDone={() => setShiftEditFor(null)}
+                                  label="Schicht an diesem Tag"
+                                />
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setShiftEditFor(session.date)}
+                                className="mb-3 text-xs text-ink-faint underline underline-offset-2 hover:text-ink"
+                              >
+                                Schicht ändern
+                              </button>
+                            )}
+
                             {loggingId === session.id ? (
                               <SessionLogForm
                                 session={session}
@@ -450,6 +527,7 @@ export default function PlanPage() {
                         ) : null}
                       </div>
                     );
+                    });
                   })}
                 </div>
               </div>

@@ -153,7 +153,9 @@ export function capacityExplanation(day: ResolvedShiftDay): string {
   const { shiftType, capacity, afterNightShift } = day;
 
   if (capacity === 'none') {
-    return `${shiftType.name} — heute ist kein Training eingeplant.`;
+    // Datumsneutral formuliert: der Satz steht auch über künftigen Tagen in
+    // der Schichtvorschau und im Plan, nicht nur über dem heutigen.
+    return `${shiftType.name} — an diesem Tag ist kein Training eingeplant.`;
   }
 
   const window = shiftType.trainingWindow ? ` (${shiftType.trainingWindow})` : '';

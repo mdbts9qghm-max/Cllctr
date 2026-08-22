@@ -820,6 +820,39 @@ weiter importieren; fehlende Felder werden als Stufe 0 gelesen.
 
 ---
 
+## Ruhetage im Plan, Schicht direkt am Tag ändern
+
+Der Plan listete nur Einheiten. Ein Tag ohne Training fiel damit komplett heraus —
+zwischen Di 25.08. und Do 27.08. klaffte eine Lücke, und ob dort ein Ruhetag geplant war
+oder etwas fehlte, war der Liste nicht anzusehen. Ein Tag ohne Einheit ist aber keine
+Lücke, sondern eine Entscheidung.
+
+Jetzt steht **jeder Tag des Zyklus** in der Liste. Tage ohne Einheit erscheinen mit
+gestricheltem Rahmen und heißen je nach Kapazität *Ruhetag* oder *Kein Training* — die
+Tagschicht ist kein Ruhetag, sondern ein Tag, an dem nichts geht. Rechts steht die
+Schichtart, damit der Grund direkt daneben steht.
+
+Und weil genau dort auffällt, dass eine Schicht nicht stimmt („da habe ich getauscht"),
+lässt sie sich jetzt an Ort und Stelle ändern statt über den Schicht-Screen:
+
+- **Ruhetag antippen** → Begründung plus Schichtauswahl.
+- **Einheit antippen** → im Detail *Schicht ändern*, eingeklappt, damit der Ablauf oben
+  bleibt.
+
+Beides schreibt dieselbe `shiftOverrides`-Abweichung wie der Schicht-Screen; die Auswahl
+steckt jetzt in `components/ShiftPicker.tsx` und wird von beiden Screens benutzt. Die
+aktuelle Schichtart ist darin hervorgehoben, ein abweichend gesetzter Tag trägt in der
+Liste ein `∗`.
+
+Durchgespielt: Tagschicht im Plan auf Freischicht gesetzt → Zeile wechselt auf *Ruhetag*
+mit `∗`. Umgekehrt einen Trainingstag auf Tagschicht gesetzt → dieselbe Zeile zeigt
+sofort „passt nicht" und im Detail den Umplanen-Knopf.
+
+`capacityExplanation()` sagt jetzt „an diesem Tag" statt „heute" — der Satz steht auch
+über künftigen Tagen.
+
+---
+
 ## Entwicklung
 
 ```
