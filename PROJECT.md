@@ -736,6 +736,90 @@ selbst einen Platz → heute ist Ruhetag, keine offenen Konflikte mehr.
 
 ---
 
+## Progressive Steigerung
+
+Vorher stand jeder Belastungszyklus für sich: Intervalle waren immer `6× 800 m`, der
+Long Run immer 90 Minuten, die Kniebeuge immer `4× 5 schwer`. Der Deload senkte die
+Last auf 60 %, danach ging es auf demselben Niveau weiter. Es gab also keine
+Steigerung — nur Wiederholung. Für jemanden, der einsteigt, war der Start außerdem zu
+hoch: 90 Minuten Long Run in der ersten Woche.
+
+Jetzt startet jede Einheitsart bei null und steigert sich mit jedem Mal.
+
+### Die Stufe zählt Vorkommen, keine Zyklen
+
+Naheliegend wäre, pro Zyklus eine Stufe hochzuzählen. Das geht schief: der Long Run
+kommt nur jeden zweiten Zyklus dran, weil er sich mit den Intervallen um die zwei
+vollen Tage streitet. Pro Zyklus zu zählen ließe ihn zwischen zwei Läufen um zwei
+Stufen springen — 45 auf 57 Minuten statt 45 auf 51.
+
+Deshalb führt **jede Einheitsart ihre eigene Stufe**, und die zählt, wie oft diese Art
+schon dran war. Der Sprung ist damit immer gleich groß, egal wie die Rotation gerade
+liegt. Der Stand steht in `Session.progressionStep`; fortgeschrieben wird er während
+der Planung in `PlanState.levels`.
+
+### Womit gesteigert wird
+
+| Einheit | Stufe 0 | pro Stufe | Grenze |
+|---|---|---|---|
+| Long Run | 45 Min | +6 Min | 120 Min |
+| Lockerer Lauf | 25 Min | +3 Min | 60 Min |
+| Recovery Run | 20 Min | +2 Min | 35 Min |
+| Tempolauf | 10 Min am Stück | +2 Min | 30 Min |
+| Intervalle | 4× 400 m | +1 Wiederholung, nach 6 die nächste Distanz | 8× 1000 m |
+| Kraft (je Übung) | untere Wiederholungszahl, leicht | +1 Wiederholung | oben angekommen: Gewicht rauf, zurück auf unten |
+
+Laufen steigert sich in Minuten bzw. Wiederholungen, Kraft nach **doppelter
+Progression**: erst die Wiederholungen innerhalb der Spanne hoch (Kniebeuge 5 → 8),
+dann Gewicht drauf und zurück auf 5. Die App kennt die Gewichte nicht und behauptet
+deshalb keine Kilogramm, sondern sagt, *was sich ändert*: „4× 6 · gleiches Gewicht"
+oder „4× 5 · +5 kg".
+
+Die Dauer der Krafteinheiten bleibt konstant — dort wächst die Last, nicht die Zeit.
+Bei den Läufen wächst die Zeit, deshalb wird `plannedDurationMin` aus der Stufe
+berechnet statt aus einem festen Vorgabewert.
+
+Die ersten beiden Male einer Art laufen bewusst unter dem Ziel-RPE (−2, dann −1).
+Stufe 0 dient dem Kennenlernen des Gewichts, nicht dem Ausreizen; über einer
+ausdrücklich leichten Einheit stünde sonst RPE 8.
+
+### Die Stufe wird verdient
+
+Ein Plan, der stur weitersteigert, egal ob trainiert wurde, ist eine Fiktion. Beim
+Erzeugen eines neuen Plans zählt `advanceProgressionBase()` deshalb nur die Einheiten
+mit, die als **erledigt** protokolliert sind, und schreibt den Stand in
+`Settings.progressionBase`. Wer einen Zyklus verpasst, verliert nichts — er setzt den
+neuen Plan nur nicht höher an, als er tatsächlich trainiert hat.
+
+Nicht mitgezählt werden:
+
+- **Deload-Zyklen** — dort wird bewusst unter dem Stand trainiert.
+- **Ersatzformen** nach einer Umplanung (`strength_short`, `run_recovery`) — sie halten
+  die Gewohnheit, sind aber kein Fortschritt.
+
+Der Deload setzt die Stufe **nicht** zurück, sondern fährt sie abgeschwächt: rund 60 %
+der aktuellen Länge, halbe Intervallanzahl, Kraft bei ca. 60 %. Danach geht es dort
+weiter, wo der Block aufgehört hat — sonst wäre die Steigerung ein Kreis.
+
+### Anzeige
+
+- **Plan → Steigerung**: eine Zeile je Einheitsart mit Stufe und dem, was als Nächstes
+  ansteht. Der Stand ist die nächste geplante Einheit dieser Art — eine Stufe, die noch
+  nicht geplant ist, ist auch nicht erreicht.
+- **Heute** und **Plan-Detail**: Chip „Stufe N" und ein Satz, was sich gegenüber dem
+  letzten Mal ändert (`Session.progressionNote`).
+
+Durchgespielt: Plan über drei Blöcke erzeugt → Long Run 45/51/57/63/69/75 Min,
+Intervalle 4×400 → 6×600, Kniebeuge 4×5 → 4×8 → +5 kg → 4×5. Dann drei
+Unterkörper-Einheiten als erledigt markiert und neu erzeugt → Kraft Unterkörper steht
+auf Stufe 3, alle anderen Arten weiter auf 0.
+
+Schema auf Version 5: `Session.progressionStep`/`progressionNote`,
+`Microcycle.progression`, `Settings.progressionBase`. Ältere Sicherungen lassen sich
+weiter importieren; fehlende Felder werden als Stufe 0 gelesen.
+
+---
+
 ## Entwicklung
 
 ```

@@ -15,6 +15,7 @@ import {
   resetSessionStatus,
   toggleSessionLock,
 } from '@/lib/plan-store';
+import { PROGRESSING_TYPES, progresses } from '@/lib/progression';
 import type { ReschedulePlan } from '@/lib/replan';
 import { SESSION_STATUS_LABEL, type Session, type Soul } from '@/lib/types';
 import { Button, Card, Mark, Notice, Section } from '@/components/ui';
@@ -63,8 +64,14 @@ export default function PlanPage() {
         settings,
         mesocycleCount: MESOCYCLE_COUNT,
       });
+      const resumed = Object.values(result.progressionBase).filter((n) => n > 0).length;
       const parts = [
         `Plan erzeugt: ${result.sessions.length} Einheiten über ${result.microcycles.length} Zyklen.`,
+        resumed === 0
+          ? 'Die Steigerung startet bei Stufe 0.'
+          : `Die Steigerung setzt auf deinen erledigten Einheiten auf — ${resumed} ${
+              resumed === 1 ? 'Einheitsart steht' : 'Einheitsarten stehen'
+            } bereits höher.`,
       ];
       if (result.doubleDays.length > 0) {
         const n = result.doubleDays.length;
@@ -116,6 +123,11 @@ export default function PlanPage() {
               Erzeugt {MESOCYCLE_COUNT} Blöcke à {settings.mesoLoadCycles} Belastungs- und{' '}
               {settings.mesoDeloadCycles} Deload-Zyklus, beginnend heute.
             </p>
+            <p className="mb-4 text-sm leading-relaxed text-ink-muted">
+              Jede Einheitsart startet auf Stufe 0 und steigert sich mit jedem Mal — der lange
+              Lauf beginnt bei 45 Minuten, Intervalle bei 4× 400 m, die Kniebeuge bei 4× 5 mit
+              einem Gewicht, bei dem 10 Wiederholungen drin wären.
+            </p>
             <Button variant="primary" onClick={() => void generate()} disabled={busy}>
               {busy ? 'Erzeuge …' : 'Plan erzeugen'}
             </Button>
@@ -141,6 +153,24 @@ export default function PlanPage() {
   const cyclesToDeload = activeMicro
     ? settings.mesoLoadCycles - activeMicro.index + (activeMicro.isDeload ? cyclesPerMeso : 0)
     : 0;
+
+  // Der Stand einer Einheitsart ist das, was als Nächstes von ihr ansteht —
+  // eine Stufe, die noch nicht geplant ist, ist auch noch nicht erreicht.
+  const levels = PROGRESSING_TYPES.map((type) => {
+    const next = plan.sessions
+      .filter((s) => s.type === type && s.status === 'planned' && s.date >= todayIso)
+      .sort((a, b) => a.date.localeCompare(b.date))[0];
+    if (!next) return null;
+    const main =
+      next.content.find((b) => /Hauptteil|Dauerlauf|Kniebeuge|Bankdrücken/i.test(b.label)) ??
+      next.content[0];
+    return {
+      type,
+      label: next.title,
+      step: next.progressionStep ?? 0,
+      detail: (main?.detail ?? '').replace(/\s*·\s*\d+–\d+\s*bpm/g, ''),
+    };
+  }).filter((x): x is NonNullable<typeof x> => x !== null);
 
   return (
     <>
@@ -209,6 +239,27 @@ export default function PlanPage() {
                 ? 'Danach beginnt der nächste Block.'
                 : `Deload in ${Math.max(0, cyclesToDeload)} ${cyclesToDeload === 1 ? 'Zyklus' : 'Zyklen'}.`}
             </p>
+          </Card>
+        </Section>
+      ) : null}
+
+      {levels.length > 0 ? (
+        <Section
+          title="Steigerung"
+          hint="Jede Einheitsart hat ihre eigene Stufe und zählt hoch, sobald du sie erledigst. Ein Deload lässt die Stufe stehen."
+        >
+          <Card>
+            <ul className="space-y-2.5">
+              {levels.map((l) => (
+                <li key={l.type} className="flex items-baseline justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm text-ink">{l.label}</p>
+                    <p className="truncate text-xs text-ink-faint">{l.detail}</p>
+                  </div>
+                  <span className="shrink-0 text-xs text-ink-muted tabular">Stufe {l.step}</span>
+                </li>
+              ))}
+            </ul>
           </Card>
         </Section>
       ) : null}
@@ -305,9 +356,18 @@ export default function PlanPage() {
                               {day.shiftType.name}
                               {day.shiftType.trainingWindow ? ` · ${day.shiftType.trainingWindow}` : ''}
                               {session.zone ? ` · Zone ${session.zone}` : ''}
-                              {session.targetRpe ? ` · RPE ${session.targetRpe}` : ''} ·{' '}
-                              {SESSION_STATUS_LABEL[session.status]}
+                              {session.targetRpe ? ` · RPE ${session.targetRpe}` : ''}
+                              {session.progressionStep !== undefined && progresses(session.type)
+                                ? ` · Stufe ${session.progressionStep}`
+                                : ''}{' '}
+                              · {SESSION_STATUS_LABEL[session.status]}
                             </p>
+
+                            {session.progressionNote ? (
+                              <p className="mb-2 text-xs leading-relaxed text-ink-muted">
+                                {session.progressionNote}
+                              </p>
+                            ) : null}
 
                             <ul className="mb-3 space-y-1">
                               {session.content.map((block, bi) => (

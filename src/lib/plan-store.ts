@@ -16,19 +16,56 @@ import {
   type ReschedulePlan,
   type RescheduleContext,
 } from './replan';
+import { progresses, type ProgressionLevels } from './progression';
 import type { ShiftContext } from './shifts';
 import type { Session, SessionFeeling, SessionLog, Settings } from './types';
 
+/**
+ * Schreibt den Stufenstand fort und gibt ihn zurück.
+ *
+ * Die Stufe wird **verdient**: sie steigt nur um die Einheiten, die im
+ * bisherigen Plan als erledigt markiert sind. Wer einen Zyklus verpasst,
+ * verliert nichts — er startet den neuen Plan nur nicht weiter oben, als er
+ * tatsächlich trainiert hat.
+ *
+ * Deload-Zyklen zählen nicht mit: dort wird bewusst unter dem aktuellen Stand
+ * trainiert, das ist kein Fortschritt.
+ */
+async function advanceProgressionBase(): Promise<ProgressionLevels> {
+  const settings = await db.settings.get('singleton');
+  const base: ProgressionLevels = { ...(settings?.progressionBase ?? {}) };
+
+  const micros = await db.microcycles.toArray();
+  const loadMicroIds = new Set(micros.filter((m) => !m.isDeload).map((m) => m.id));
+
+  for (const session of await db.sessions.toArray()) {
+    if (session.status !== 'done') continue;
+    if (!loadMicroIds.has(session.microcycleId)) continue;
+    if (!progresses(session.type)) continue;
+    base[session.type] = (base[session.type] ?? 0) + 1;
+  }
+
+  if (settings) {
+    await db.settings.update('singleton', { progressionBase: base, updatedAt: now() });
+  }
+  return base;
+}
+
 /** Erzeugt einen Plan und schreibt ihn. Ein bestehender aktiver Plan wird ersetzt. */
 export async function createAndSavePlan(input: PlanInput): Promise<GeneratedPlan> {
-  const plan = generateTrainingPlan(input);
+  let plan!: GeneratedPlan;
 
   // sessionLogs gehört in den Transaktionsbereich, weil das Aufräumen prüft,
   // welche Sessions bereits protokolliert sind — ohne das bricht Dexie ab.
+  // settings ebenso: dort steht der fortgeschriebene Stufenstand.
   await db.transaction(
     'rw',
-    [db.macrocycles, db.mesocycles, db.microcycles, db.sessions, db.sessionLogs],
+    [db.macrocycles, db.mesocycles, db.microcycles, db.sessions, db.sessionLogs, db.settings],
     async () => {
+      // Erst den Stand aus dem alten Plan einsammeln, dann löschen.
+      const progressionBase = input.progressionBase ?? (await advanceProgressionBase());
+      plan = generateTrainingPlan({ ...input, progressionBase });
+
       await clearActivePlanInternal();
       await db.macrocycles.put(plan.macrocycle);
       await db.mesocycles.bulkPut(plan.mesocycles);
@@ -38,6 +75,12 @@ export async function createAndSavePlan(input: PlanInput): Promise<GeneratedPlan
   );
 
   return plan;
+}
+
+/** Aktueller Stufenstand, ohne ihn fortzuschreiben. */
+export async function getProgressionBase(): Promise<ProgressionLevels> {
+  const settings = await db.settings.get('singleton');
+  return settings?.progressionBase ?? {};
 }
 
 /**

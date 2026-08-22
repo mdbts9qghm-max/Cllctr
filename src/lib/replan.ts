@@ -25,6 +25,7 @@
 
 import { addDays, formatShort } from './dates';
 import { now } from './ids';
+import { sessionForm } from './progression';
 import { capacityAllows, type ShiftContext, resolveShiftRange } from './shifts';
 import {
   SESSION_TYPES,
@@ -32,7 +33,9 @@ import {
   type IsoDate,
   type PlanningProfile,
   type ResolvedShiftDay,
+  type HrZone,
   type Session,
+  type SessionBlock,
   type SessionTypeKey,
   type Settings,
 } from './types';
@@ -71,7 +74,14 @@ export interface RescheduleMove {
   newType: SessionTypeKey | null;
   newTitle: string | null;
   newDurationMin: number | null;
+  newTargetRpe: number | null;
   newLoad: number | null;
+  /**
+   * Ablauf der Ersatzform. Ohne das stünde in der verkürzten Einheit weiter
+   * der Inhalt der vollen — bei einer gesteigerten Einheit fällt das sofort
+   * auf ("90 Min" über einem 45-Minuten-Lauf).
+   */
+  newContent: SessionBlock[] | null;
 }
 
 export interface RescheduleDrop {
@@ -321,8 +331,18 @@ function searchPlacement(
 /* Vorschlag                                                           */
 /* ------------------------------------------------------------------ */
 
-function moveFor(session: Session, placement: Placement, reason: string): RescheduleMove {
+function moveFor(
+  session: Session,
+  placement: Placement,
+  reason: string,
+  zones: HrZone[],
+): RescheduleMove {
   const meta = SESSION_TYPES[placement.type];
+  // Die Ersatzform übernimmt die Stufe der ausgefallenen Einheit: die Form ist
+  // kleiner, das Leistungsniveau bleibt dasselbe.
+  const form = placement.reduced
+    ? sessionForm(placement.type, zones, session.progressionStep ?? 0, false)
+    : null;
   return {
     sessionId: session.id,
     title: session.title,
@@ -332,8 +352,10 @@ function moveFor(session: Session, placement: Placement, reason: string): Resche
     isDouble: placement.isDouble,
     newType: placement.reduced ? placement.type : null,
     newTitle: placement.reduced ? meta.label : null,
-    newDurationMin: placement.reduced ? meta.defaultDurationMin : null,
+    newDurationMin: form ? form.durationMin : null,
+    newTargetRpe: form ? form.targetRpe : null,
     newLoad: placement.reduced ? meta.load : null,
+    newContent: form ? form.content : null,
   };
 }
 
@@ -413,7 +435,7 @@ export function proposeReschedule(missed: Session, ctx: RescheduleContext): Resc
   }
 
   const place = primary.placement;
-  moves.push(moveFor(missed, place, placementReason(missed, place)));
+  moves.push(moveFor(missed, place, placementReason(missed, place), ctx.settings.hrZones));
 
   // Die verschobene Einheit belegt ihren neuen Tag ab jetzt.
   const movedIndex = working.findIndex((s) => s.id === missed.id);
@@ -442,6 +464,7 @@ export function proposeReschedule(missed: Session, ctx: RescheduleContext): Resc
           sub.placement,
           `${placementReason(key, sub.placement)} Musste ${missed.title} am ` +
             `${formatShort(place.day.date)} weichen.`,
+          ctx.settings.hrZones,
         ),
       );
       const i = working.findIndex((s) => s.id === key.id);
@@ -530,9 +553,12 @@ export function applyRescheduleToSessions(sessions: Session[], plan: RescheduleP
               discipline: meta.discipline,
               plannedDurationMin: move.newDurationMin,
               zone: meta.defaultZone,
-              targetRpe: meta.defaultRpe,
+              targetRpe: move.newTargetRpe ?? meta.defaultRpe,
               load: meta.load,
               isKey: meta.isKey,
+              ...(move.newContent ? { content: move.newContent } : {}),
+              progressionNote:
+                'Ersatzform nach einer Umplanung — die Stufe bleibt stehen, sie zählt nicht hoch.',
             }
           : {}),
         updatedAt: ts,

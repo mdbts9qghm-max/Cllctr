@@ -12,7 +12,7 @@ export type IsoDate = string;
 export type IsoDateTime = string;
 
 /** Version des Schemas im Export. Wird bei jeder Änderung am Modell hochgezählt. */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 /* ------------------------------------------------------------------ */
 /* Schicht                                                             */
@@ -361,6 +361,8 @@ export interface Microcycle {
   targetSessions: WeeklyTargets;
   /** Summe der load-Werte aller geplanten Sessions. Basis für Deload-Erkennung. */
   plannedLoad: number;
+  /** Stufenstand je Einheitsart zu Beginn dieses Zyklus. */
+  progression: Record<string, number>;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
 }
@@ -402,6 +404,14 @@ export interface Session {
   /** Kopie aus SESSION_TYPES, damit manuelle Änderungen das überschreiben können. */
   isKey: boolean;
   load: number;
+  /**
+   * Stufe der progressiven Steigerung, mit der diese Einheit geplant wurde.
+   * 0 ist die erste Einheit dieser Art überhaupt. Wird mitgespeichert, damit
+   * eine Einheit auch nach einer Planänderung noch erklärt, wo sie herkommt.
+   */
+  progressionStep: number;
+  /** Was sich gegenüber der letzten Stufe ändert — ein Halbsatz. */
+  progressionNote: string | null;
   content: SessionBlock[];
   status: SessionStatus;
   /** Ursprungsdatum, falls die Session verschoben wurde. */
@@ -635,6 +645,14 @@ export interface Settings {
   /** Zyklen pro Mesozyklus: Belastung und anschließender Deload. */
   mesoLoadCycles: number;
   mesoDeloadCycles: number;
+  /**
+   * Erreichte Stufe je Einheitsart, über Pläne hinweg.
+   *
+   * Ein neuer Plan setzt hier auf, statt wieder bei null anzufangen — erhöht
+   * wird aber nur um die Einheiten, die auch wirklich erledigt wurden. Leer
+   * bedeutet: alles auf Stufe 0.
+   */
+  progressionBase: Record<string, number>;
   /** Zwei harte Tage dürfen nicht direkt aufeinanderfolgen. */
   minHoursBetweenKeySessions: number;
   /** Wie viele Tage der Umplaner nach vorne suchen darf. */

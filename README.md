@@ -53,6 +53,7 @@ src/
     db.ts         Dexie-Schema (IndexedDB)
     shifts.ts     Schichtrotation → Trainingskapazität je Tag
     planner.ts    Generator: Wochenziele → Einheiten auf konkrete Tage
+    progression.ts  Progressive Steigerung: Stufe je Einheitsart → Inhalt
     replan.ts     Adaptives Umplanen bei verpassten Einheiten
     explain.ts    Begründungen für den Heute-Screen
     tasks.ts      Energiebudget des Tages, Wiederholungen

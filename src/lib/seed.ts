@@ -159,6 +159,8 @@ export function defaultSettings(): Settings {
     allowDoubleDayPerCycle: true,
     mesoLoadCycles: 4,
     mesoDeloadCycles: 1,
+    // Leer: der erste Plan fängt bei null an.
+    progressionBase: {},
     minHoursBetweenKeySessions: 24,
     rescheduleWindowDays: 7,
     confirmRescheduleProposals: true,
@@ -193,6 +195,13 @@ export async function seedIfEmpty(): Promise<void> {
     async () => {
     if ((await db.settings.count()) === 0) {
       await db.settings.put(defaultSettings());
+    } else {
+      // Nachgereicht für Installationen von vor der progressiven Steigerung:
+      // ohne den Stufenstand fiele jeder neue Plan auf Stufe 0 zurück.
+      const existing = await db.settings.get('singleton');
+      if (existing && !existing.progressionBase) {
+        await db.settings.update('singleton', { progressionBase: {}, updatedAt: now() });
+      }
     }
     if ((await db.shiftTypes.count()) === 0) {
       await db.shiftTypes.bulkPut(DEFAULT_SHIFT_TYPES);

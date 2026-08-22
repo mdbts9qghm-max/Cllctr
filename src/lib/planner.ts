@@ -15,9 +15,14 @@ import { addDays, daysBetween, mod } from './dates';
 import { newId, now } from './ids';
 import { capacityAllows, type ShiftContext, resolveShiftRange } from './shifts';
 import {
+  levelOf,
+  progresses,
+  sessionForm,
+  type ProgressionLevels,
+} from './progression';
+import {
   CAPACITY_RANK,
   SESSION_TYPES,
-  type HrZone,
   type IsoDate,
   type Macrocycle,
   type Mesocycle,
@@ -25,7 +30,6 @@ import {
   type PlanningProfile,
   type ResolvedShiftDay,
   type Session,
-  type SessionBlock,
   type SessionTypeKey,
   type Settings,
   type WeeklyTargets,
@@ -40,134 +44,6 @@ import {
  * beide nutzen: einer bekommt den harten Lauf, der andere Gym.
  */
 const MAX_CONSECUTIVE_HARD_DAYS = 1;
-
-/* ------------------------------------------------------------------ */
-/* Inhalte                                                             */
-/* ------------------------------------------------------------------ */
-
-function zoneText(zones: HrZone[], zone: number | null): string {
-  if (zone === null) return '';
-  const z = zones.find((x) => x.zone === zone);
-  if (!z || z.maxBpm === 0) return `Zone ${zone}`;
-  return `Zone ${zone} · ${z.minBpm}–${z.maxBpm} bpm`;
-}
-
-/**
- * Konkreter Inhalt einer Session, zusammen mit der Dauer.
- *
- * Beides entsteht bewusst an einer Stelle: eine separat hochgerechnete Dauer
- * würde sonst dem Text im Inhalt widersprechen ("18 Min" über "30 Min locker").
- */
-function buildSessionPlan(
-  type: SessionTypeKey,
-  zones: HrZone[],
-  isDeload: boolean,
-): { content: SessionBlock[]; durationMin: number } {
-  const blocks = buildContent(type, zones, isDeload);
-  return { content: blocks, durationMin: durationFor(type, isDeload) };
-}
-
-/** Dauer in Minuten, im Deload auf runde, kürzere Werte gesetzt. */
-function durationFor(type: SessionTypeKey, isDeload: boolean): number {
-  if (!isDeload) return SESSION_TYPES[type].defaultDurationMin;
-  const deloadDurations: Record<SessionTypeKey, number> = {
-    run_intervals: 40,
-    run_tempo: 35,
-    run_long: 60,
-    run_easy: 30,
-    run_recovery: 20,
-    strength_lower: 40,
-    strength_upper: 40,
-    strength_full: 40,
-    strength_short: 25,
-    mobility: 20,
-  };
-  return deloadDurations[type];
-}
-
-function buildContent(
-  type: SessionTypeKey,
-  zones: HrZone[],
-  isDeload: boolean,
-): SessionBlock[] {
-  const warmup = { label: 'Einlaufen', detail: `10–15 Min ${zoneText(zones, 1)}` };
-  const cooldown = { label: 'Auslaufen', detail: `10 Min ${zoneText(zones, 1)}` };
-
-  switch (type) {
-    case 'run_intervals':
-      return isDeload
-        ? [warmup, { label: 'Hauptteil', detail: `4× 2 Min ${zoneText(zones, 3)}, 2 Min Trabpause` }, cooldown]
-        : [
-            warmup,
-            { label: 'Hauptteil', detail: `6× 800 m ${zoneText(zones, 4)}, 2 Min Trabpause` },
-            cooldown,
-          ];
-    case 'run_tempo':
-      return [warmup, { label: 'Hauptteil', detail: `20 Min am Stück ${zoneText(zones, 3)}` }, cooldown];
-    case 'run_long':
-      return isDeload
-        ? [{ label: 'Dauerlauf', detail: `60 Min ${zoneText(zones, 2)}` }]
-        : [
-            { label: 'Dauerlauf', detail: `90 Min ${zoneText(zones, 2)}` },
-            { label: 'Schluss', detail: 'Letzte 10 Min etwas zügiger, wenn es sich gut anfühlt' },
-          ];
-    case 'run_easy':
-      return [
-        { label: 'Dauerlauf', detail: `${isDeload ? 30 : 45} Min ${zoneText(zones, 2)}` },
-      ];
-    case 'run_recovery':
-      return [
-        {
-          label: 'Regenerationslauf',
-          detail: `${isDeload ? 20 : 30} Min ${zoneText(zones, 1)}, bewusst langsam`,
-        },
-      ];
-    case 'strength_lower':
-      return isDeload
-        ? [
-            { label: 'Kniebeuge', detail: '3× 5 bei 60 % — Technik, kein Maximalversuch' },
-            { label: 'Rumänisches Kreuzheben', detail: '3× 8 locker' },
-            { label: 'Rumpf', detail: '3 Sätze' },
-          ]
-        : [
-            { label: 'Kniebeuge', detail: '4× 5 schwer' },
-            { label: 'Kreuzheben', detail: '3× 5' },
-            { label: 'Ausfallschritte', detail: '3× 10 je Bein' },
-            { label: 'Wadenheben & Rumpf', detail: 'je 3 Sätze' },
-          ];
-    case 'strength_upper':
-      return isDeload
-        ? [
-            { label: 'Bankdrücken', detail: '3× 6 bei 60 %' },
-            { label: 'Rudern', detail: '3× 10 locker' },
-          ]
-        : [
-            { label: 'Bankdrücken', detail: '4× 6 schwer' },
-            { label: 'Klimmzüge', detail: '4 Sätze bis 2 Wiederholungen vor dem Limit' },
-            { label: 'Schulterdrücken', detail: '3× 8' },
-            { label: 'Rudern', detail: '3× 10' },
-          ];
-    case 'strength_full':
-      return [
-        { label: 'Kniebeuge', detail: '3× 6' },
-        { label: 'Bankdrücken', detail: '3× 6' },
-        { label: 'Rudern', detail: '3× 10' },
-      ];
-    case 'strength_short':
-      return [
-        { label: 'Grundübung', detail: '3× 8 mittelschwer — was heute noch geht' },
-        { label: 'Zug- oder Druckübung', detail: '3× 10' },
-        { label: 'Rumpf', detail: '2 Sätze' },
-      ];
-    case 'mobility':
-      return [
-        {
-          label: 'Mobility',
-          detail: `${isDeload ? 20 : '20–25'} Min Hüfte, Brustwirbelsäule, Sprunggelenk`,
-        },
-      ];
-  }
-}
 
 /**
  * Titel ohne Deload-Zusatz.
@@ -198,9 +74,11 @@ export interface PlanState {
   nextRunKey: 'run_intervals' | 'run_long';
   /** Welcher Kraft-Split als Nächstes dran ist. */
   nextSplit: 'strength_lower' | 'strength_upper';
+  /** Erreichte Stufe je Einheitsart, während der Planung fortgeschrieben. */
+  levels: ProgressionLevels;
 }
 
-export function initialPlanState(): PlanState {
+export function initialPlanState(base: ProgressionLevels = {}): PlanState {
   return {
     // Ein halber Übertrag zum Start lässt den ersten — meist angebrochenen —
     // Zyklus zur nächsten ganzen Zahl runden statt abzuschneiden. Über die
@@ -208,6 +86,7 @@ export function initialPlanState(): PlanState {
     carry: { strength: 0.5, run: 0.5, optional: 0.5 },
     nextRunKey: 'run_intervals',
     nextSplit: 'strength_lower',
+    levels: { ...base },
   };
 }
 
@@ -302,6 +181,9 @@ function buildCandidates(
       carry: { run: runCarry, strength: strengthCarry, optional: optionalCarry },
       nextRunKey,
       nextSplit,
+      // Die Stufen fasst der Kandidatenbau nicht an; hochgezählt wird erst,
+      // wenn eine Einheit tatsächlich einen Tag bekommen hat.
+      levels: state.levels,
     },
   };
 }
@@ -547,6 +429,8 @@ export interface GeneratedPlan {
   unplaced: Array<{ cycleStart: IsoDate; type: SessionTypeKey }>;
   /** Tage, an denen ausnahmsweise zwei Einheiten liegen. */
   doubleDays: IsoDate[];
+  /** Stufenstand, auf dem dieser Plan aufsetzt. Leer heißt: von null. */
+  progressionBase: ProgressionLevels;
 }
 
 export interface PlanInput {
@@ -556,6 +440,11 @@ export interface PlanInput {
   /** Wie viele Mesozyklen im Voraus erzeugt werden. */
   mesocycleCount: number;
   name?: string;
+  /**
+   * Bereits erreichte Stufen. Ohne Angabe startet jede Einheitsart bei 0 —
+   * der erste Plan fängt also tatsächlich bei null an.
+   */
+  progressionBase?: ProgressionLevels;
 }
 
 /**
@@ -599,7 +488,7 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
   const unplaced: GeneratedPlan['unplaced'] = [];
   const doubleDays: IsoDate[] = [];
 
-  let state = initialPlanState();
+  let state = initialPlanState(input.progressionBase ?? {});
   // Der erste Zyklus beginnt heute und ist deshalb oft angebrochen.
   let cursor = startDate;
   let globalCycle = 0;
@@ -653,6 +542,7 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
         isDeload,
         targetSessions: settings.weeklyTargets,
         plannedLoad: 0,
+        progression: { ...state.levels },
         createdAt: ts,
         updatedAt: ts,
       };
@@ -685,7 +575,13 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
       }
       if (placement.doubleDay) doubleDays.push(placement.doubleDay);
 
-      for (const slot of placement.slots) {
+      // Nach Datum sortiert durchlaufen: die Stufe zählt chronologisch hoch,
+      // sonst bekäme der spätere Tag im Zyklus die niedrigere Stufe.
+      const slotsByDate = [...placement.slots].sort((a, b) =>
+        a.day.date.localeCompare(b.day.date),
+      );
+
+      for (const slot of slotsByDate) {
         // An einem Doppeltag zuerst die Laufeinheit, dann Kraft: mit frischen
         // Beinen läuft es sich besser, und die Kraft leidet weniger darunter.
         const ordered = [...slot.assigned].sort(
@@ -697,7 +593,15 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
         ordered.forEach((type, orderIndex) => {
           const meta = SESSION_TYPES[type];
           const deloadFactor = isDeload ? 0.6 : 1;
-          const plan = buildSessionPlan(type, settings.hrZones, isDeload);
+          const step = levelOf(state.levels, type);
+          const form = sessionForm(type, settings.hrZones, step, isDeload);
+
+          // Erst planen, dann hochzählen: die nächste Einheit derselben Art
+          // liegt eine Stufe höher. Im Deload wird nicht gezählt — dort geht es
+          // ausdrücklich nicht um mehr, sondern um weniger.
+          if (!isDeload && progresses(type)) {
+            state = { ...state, levels: { ...state.levels, [type]: step + 1 } };
+          }
 
           sessions.push({
             id: newId('ses'),
@@ -707,13 +611,15 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
             discipline: meta.discipline,
             type,
             title: sessionTitle(type),
-            plannedDurationMin: plan.durationMin,
+            plannedDurationMin: form.durationMin,
             plannedDistanceKm: null,
             zone: meta.defaultZone,
-            targetRpe: isDeload ? Math.max(2, meta.defaultRpe - 2) : meta.defaultRpe,
+            targetRpe: form.targetRpe,
             isKey: meta.isKey && !isDeload,
             load: Math.round(meta.load * deloadFactor * 10) / 10,
-            content: plan.content,
+            progressionStep: step,
+            progressionNote: form.note,
+            content: form.content,
             status: 'planned',
             originalDate: null,
             rescheduleReason: null,
@@ -740,5 +646,13 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
 
   macrocycle.endDate = addDays(cursor, -1);
 
-  return { macrocycle, mesocycles, microcycles, sessions, unplaced, doubleDays };
+  return {
+    macrocycle,
+    mesocycles,
+    microcycles,
+    sessions,
+    unplaced,
+    doubleDays,
+    progressionBase: input.progressionBase ?? {},
+  };
 }

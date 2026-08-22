@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { SessionExplanation } from '@/lib/explain';
+import { progresses } from '@/lib/progression';
 import type { Session, Soul } from '@/lib/types';
 import { Button, Chip, Mark } from './ui';
 import { NewRecordsNotice, SessionLogForm } from './SessionLogForm';
@@ -113,6 +114,9 @@ export function SessionCard({
           <Chip>{session.plannedDurationMin} Min</Chip>
           {session.zone ? <Chip>Zone {session.zone}</Chip> : null}
           {session.targetRpe ? <Chip>RPE {session.targetRpe}</Chip> : null}
+          {progresses(session.type) && session.progressionStep !== undefined ? (
+            <Chip>Stufe {session.progressionStep}</Chip>
+          ) : null}
         </div>
 
         {line && !expanded ? (
@@ -138,6 +142,15 @@ export function SessionCard({
               </li>
             ))}
           </ul>
+
+          {session.progressionNote ? (
+            <div className="mb-3 rounded-lg border border-line bg-surface-2 p-3">
+              <p className="mb-1 text-[10px] uppercase tracking-widest text-ink-faint">
+                Steigerung
+              </p>
+              <p className="text-sm leading-relaxed text-ink-muted">{session.progressionNote}</p>
+            </div>
+          ) : null}
 
           <div className="rounded-lg border border-line bg-surface-2 p-3">
             <p className="mb-1 text-[10px] uppercase tracking-widest text-ink-faint">Warum heute</p>
