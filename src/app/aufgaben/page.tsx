@@ -73,6 +73,9 @@ export default function AufgabenPage() {
     });
 
   function resetForm() {
+    // Auch die Art zurücksetzen: Blieb sie auf "Termin" stehen, landete die
+    // nächste Aufgabe stillschweigend dort — und tauchte in "Täglich" nie auf.
+    setKind('chore');
     setTitle('');
     setDueDate('');
     setTime('');
@@ -265,6 +268,18 @@ export default function AufgabenPage() {
                   <option value="monthly">monatlich</option>
                 </select>
               </Field>
+              {recurrence === 'daily' && kind === 'chore' ? (
+                <p className="mt-1 text-xs leading-relaxed text-ember">
+                  Wird als Routine geführt: steht jeden Tag oben auf dem Heute-Screen, auch an
+                  vollen Schichttagen.
+                </p>
+              ) : null}
+              {recurrence === 'daily' && kind === 'appointment' ? (
+                <p className="mt-1 text-xs leading-relaxed text-ink-faint">
+                  Als Termin geführt, nicht als Routine. Für etwas, das du dir täglich vornimmst,
+                  wähle oben „Haushalt".
+                </p>
+              ) : null}
             </div>
 
             <div className="flex gap-2">
