@@ -9,7 +9,13 @@ import { useSettings, useShiftContext } from '@/lib/hooks';
 import { capacityAllows, resolveShiftDay, resolveShiftRange } from '@/lib/shifts';
 import { blockStatus, explainRestDay, explainSession } from '@/lib/explain';
 import { applyRescheduleProposal, buildRescheduleProposal, markSessionMissed } from '@/lib/plan-store';
-import { appointmentsOn, suggestTasks, taskEnergyBudget, tasksBlockedByEnergy } from '@/lib/tasks';
+import {
+  appointmentsOn,
+  dailyTasks,
+  suggestTasks,
+  taskEnergyBudget,
+  tasksBlockedByEnergy,
+} from '@/lib/tasks';
 import { completeTask } from '@/lib/task-store';
 import { getSoulsInReach } from '@/lib/soul-store';
 import type { ReschedulePlan } from '@/lib/replan';
@@ -102,6 +108,7 @@ export default function HeutePage() {
 
   const budget = taskEnergyBudget(day, todaySessions);
   const todayAppointments: Task[] = appointmentsOn(data.tasks, todayIso);
+  const dailies = dailyTasks(data.tasks, todayIso);
   const suggested = suggestTasks(data.tasks, budget, todayIso);
   const blocked = tasksBlockedByEnergy(data.tasks, budget, todayIso);
 
@@ -243,7 +250,34 @@ export default function HeutePage() {
 
       </section>
 
-      {/* 2 — Aufgaben, passend zur Energie des Tages */}
+      {/* 2a — Tägliche Routinen, unabhängig von der Tagesenergie */}
+      {dailies.length > 0 ? (
+        <Section
+          title="Täglich"
+          hint="Was du dir jeden Tag vorgenommen hast. Steht hier unabhängig davon, wie voll der Tag ist."
+        >
+          <div className="space-y-1.5">
+            {dailies.map((task) => (
+              <div
+                key={task.id}
+                className="flex items-center gap-3 rounded border border-line bg-surface px-3 py-2.5"
+              >
+                <button
+                  onClick={() => void completeTask(task)}
+                  aria-label="Abhaken"
+                  className="size-5 shrink-0 rounded border border-line-strong transition-colors hover:border-ember"
+                />
+                <span className="flex-1 truncate text-sm text-ink">{task.title}</span>
+                <span className="shrink-0 text-[11px] text-ink-faint">
+                  {TASK_ENERGY_LABEL[task.energy]}
+                </span>
+              </div>
+            ))}
+          </div>
+        </Section>
+      ) : null}
+
+      {/* 2b — Aufgaben, passend zur Energie des Tages */}
       <Section title="Heute sinnvoll" hint={budget.reason}>
         {todayAppointments.length > 0 ? (
           <div className="mb-3 space-y-1.5">
@@ -292,6 +326,10 @@ export default function HeutePage() {
               Anlegen
             </Link>{' '}
             — die App schlägt dann nur vor, was zum Tag passt.
+          </Notice>
+        ) : dailies.length > 0 ? (
+          <Notice tone="info">
+            Außer den täglichen Routinen steht heute nichts an.
           </Notice>
         ) : (
           <Notice tone="info">

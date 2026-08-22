@@ -133,6 +133,36 @@ export function appointmentsOn(tasks: Task[], date: IsoDate): Task[] {
     .sort((a, b) => (a.time ?? '99:99').localeCompare(b.time ?? '99:99'));
 }
 
+/** Eine tägliche Routine — kein gewöhnlicher Vorschlag. */
+export function isDaily(task: Task): boolean {
+  return task.recurrence?.kind === 'daily';
+}
+
+/**
+ * Tägliche Routinen, die heute anstehen.
+ *
+ * Sie laufen bewusst an der Vorschlagslogik vorbei: Was man sich täglich
+ * vorgenommen hat, soll nicht mit einmaligen Aufgaben um drei Plätze
+ * konkurrieren und auch an einem knappen Tag nicht stillschweigend
+ * verschwinden. Die Entscheidung, ob es heute passt, ist dann deine — die App
+ * hält den Vorsatz nur sichtbar.
+ */
+export function dailyTasks(tasks: Task[], todayIso: IsoDate): Task[] {
+  return tasks
+    .filter(
+      (t) =>
+        t.kind === 'chore' &&
+        t.status === 'open' &&
+        isDaily(t) &&
+        (t.dueDate === null || t.dueDate <= todayIso),
+    )
+    .sort(
+      (a, b) =>
+        a.priority - b.priority ||
+        ENERGY_ORDER.indexOf(a.energy) - ENERGY_ORDER.indexOf(b.energy),
+    );
+}
+
 /**
  * Die Aufgaben, die heute wirklich sinnvoll sind.
  *
@@ -140,6 +170,9 @@ export function appointmentsOn(tasks: Task[], date: IsoDate): Task[] {
  * deren Energiebedarf der Tag nicht hergibt, tauchen gar nicht erst auf — sie
  * als "heute vielleicht" anzuzeigen wäre genau das Nachdenken, das die App
  * abnehmen soll.
+ *
+ * Tägliche Routinen sind hier ausgenommen; die stehen in ihrem eigenen
+ * Abschnitt und würden sonst jeden Tag alle Plätze belegen.
  */
 export function suggestTasks(
   tasks: Task[],
@@ -151,6 +184,7 @@ export function suggestTasks(
     (t) =>
       t.kind === 'chore' &&
       t.status === 'open' &&
+      !isDaily(t) &&
       budget.allowed.includes(t.energy) &&
       (t.dueDate === null || t.dueDate <= todayIso),
   );
@@ -177,6 +211,7 @@ export function tasksBlockedByEnergy(
     (t) =>
       t.kind === 'chore' &&
       t.status === 'open' &&
+      !isDaily(t) &&
       !budget.allowed.includes(t.energy) &&
       (t.dueDate === null || t.dueDate <= todayIso),
   );

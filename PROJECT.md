@@ -403,6 +403,21 @@ erledigte bleibt als Verlauf stehen, sonst wäre nach einem Jahr nicht nachvollz
 oft etwas tatsächlich gemacht wurde. Monatliche Termine werden auf den Monatsletzten
 begrenzt, damit der 31. Januar nicht in den 3. März rutscht.
 
+### Tägliche Routinen sind keine Vorschläge
+
+Aufgaben mit täglicher Wiederholung laufen bewusst an der Vorschlagslogik vorbei und stehen
+in einem eigenen Abschnitt — auf dem Heute-Screen wie im Aufgaben-Screen. Zwei Gründe:
+
+1. Sie würden sonst **jeden Tag alle drei Vorschlagsplätze belegen**, und einmalige
+   Aufgaben kämen nie durch.
+2. Sie würden an einem knappen Tag **stillschweigend verschwinden** — obwohl man sie sich
+   täglich vorgenommen hat. Ob es heute wirklich passt, ist deine Entscheidung; die App
+   hält den Vorsatz nur sichtbar.
+
+Deshalb gilt für sie auch das Etikett „heute nicht drin" nicht — es wäre ein Widerspruch zu
+dem, was der Heute-Screen zeigt. Wöchentliche und monatliche Aufgaben bleiben normale
+Vorschläge und erscheinen an ihrem Fälligkeitstag.
+
 ### Geprüft
 
 - Wiederholungslogik: täglich, mehrtägig, wöchentlich mit Wochentag, monatlich,

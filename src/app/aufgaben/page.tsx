@@ -6,7 +6,7 @@ import { db } from '@/lib/db';
 import { formatShort, today } from '@/lib/dates';
 import { useShiftContext } from '@/lib/hooks';
 import { resolveShiftDay } from '@/lib/shifts';
-import { isOverdue, taskEnergyBudget } from '@/lib/tasks';
+import { isDaily, isOverdue, taskEnergyBudget } from '@/lib/tasks';
 import { completeTask, createTask, deleteTask, reopenTask } from '@/lib/task-store';
 import {
   TASK_ENERGY_LABEL,
@@ -62,8 +62,11 @@ export default function AufgabenPage() {
   const appointments = open
     .filter((t) => t.kind === 'appointment')
     .sort((a, b) => (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999'));
+  const dailies = open
+    .filter((t) => t.kind === 'chore' && isDaily(t))
+    .sort((a, b) => a.priority - b.priority || a.title.localeCompare(b.title));
   const chores = open
-    .filter((t) => t.kind === 'chore')
+    .filter((t) => t.kind === 'chore' && !isDaily(t))
     .sort((a, b) => {
       const rank = (t: Task) => (isOverdue(t, todayIso) ? 0 : t.dueDate ? 1 : 2);
       return rank(a) - rank(b) || a.priority - b.priority || (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999');
@@ -97,7 +100,10 @@ export default function AufgabenPage() {
 
   function TaskRow({ task }: { task: Task }) {
     const overdue = isOverdue(task, todayIso);
-    const fits = task.kind === 'appointment' || budget.allowed.includes(task.energy);
+    // Routinen laufen an der Energieprüfung vorbei — sie stehen auch an knappen
+    // Tagen auf dem Heute-Screen. Das Etikett wäre hier ein Widerspruch.
+    const fits =
+      task.kind === 'appointment' || isDaily(task) || budget.allowed.includes(task.energy);
 
     return (
       <div className="flex items-start gap-3 rounded border border-line bg-surface px-3 py-2.5">
@@ -279,6 +285,19 @@ export default function AufgabenPage() {
         <Section title="Termine" hint="Liegen fest und werden immer angezeigt, egal wie der Tag aussieht.">
           <div className="space-y-1.5">
             {appointments.map((t) => (
+              <TaskRow key={t.id} task={t} />
+            ))}
+          </div>
+        </Section>
+      ) : null}
+
+      {dailies.length > 0 ? (
+        <Section
+          title={`Täglich (${dailies.length})`}
+          hint="Routinen. Erscheinen jeden Tag auf dem Heute-Screen, unabhängig von der Tagesenergie."
+        >
+          <div className="space-y-1.5">
+            {dailies.map((t) => (
               <TaskRow key={t.id} task={t} />
             ))}
           </div>
