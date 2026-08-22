@@ -9,7 +9,15 @@
 import { db } from './db';
 import { newId, now } from './ids';
 import { startOfWeek, today } from './dates';
-import { SCHEMA_VERSION, type Exercise, type Settings, type ShiftPattern, type ShiftType } from './types';
+import {
+  SCHEMA_VERSION,
+  type Exercise,
+  type Settings,
+  type ShiftPattern,
+  type ShiftType,
+  type Task,
+  type TaskEnergy,
+} from './types';
 
 export const DEFAULT_SHIFT_TYPES: ShiftType[] = [
   {
@@ -107,6 +115,27 @@ const DEFAULT_EXERCISES: Array<Pick<Exercise, 'name' | 'discipline' | 'metric' |
   { name: 'Halbmarathon', discipline: 'run', metric: 'time', higherIsBetter: false },
 ];
 
+/**
+ * Tägliche Routinen, die ab Werk drinstehen.
+ *
+ * Bewusst nur Kleinigkeiten, die ohnehin jeden Tag anstehen und nichts kosten
+ * außer daran zu denken — genau dafür ist die Liste da. Alles hier lässt sich
+ * umbenennen oder löschen; gelöscht bleibt gelöscht.
+ */
+const DEFAULT_DAILY_ROUTINES: Array<{ title: string; notes: string; energy: TaskEnergy }> = [
+  { title: 'Supplements', notes: 'Kreatin, Vitamin D, Magnesium', energy: 'light' },
+  { title: '3 Liter trinken', notes: 'An Schichttagen die Flasche mitnehmen.', energy: 'light' },
+  { title: 'Proteinziel erreichen', notes: '', energy: 'light' },
+  { title: 'Mobility 10 Minuten', notes: 'Hüfte, Brustwirbelsäule, Sprunggelenk.', energy: 'light' },
+];
+
+/**
+ * Schlüssel in der Meta-Tabelle, der festhält, dass die Routinen schon einmal
+ * angelegt wurden. Ohne ihn kämen sie nach jedem Löschen wieder — mit ihm
+ * bekommt auch eine bestehende Installation sie einmalig nachgereicht.
+ */
+const DAILY_ROUTINES_SEEDED = 'seed.dailyRoutines.v1';
+
 export function defaultSettings(): Settings {
   const ts = now();
   return {
@@ -158,7 +187,10 @@ function defaultPattern(): ShiftPattern {
  * unschädlich — jede Tabelle wird nur befüllt, wenn sie leer ist.
  */
 export async function seedIfEmpty(): Promise<void> {
-  await db.transaction('rw', db.settings, db.shiftTypes, db.shiftPatterns, db.exercises, async () => {
+  await db.transaction(
+    'rw',
+    [db.settings, db.shiftTypes, db.shiftPatterns, db.exercises, db.tasks, db.meta],
+    async () => {
     if ((await db.settings.count()) === 0) {
       await db.settings.put(defaultSettings());
     }
@@ -178,6 +210,31 @@ export async function seedIfEmpty(): Promise<void> {
           createdAt: ts,
         })),
       );
+    }
+
+    // Nicht an "Tabelle leer" gekoppelt, sondern an eine eigene Markierung:
+    // So bekommt auch eine Installation, in der schon Aufgaben liegen, die
+    // Routinen einmalig nachgereicht — und ein Löschen hält.
+    if (!(await db.meta.get(DAILY_ROUTINES_SEEDED))) {
+      const ts = now();
+      const routines: Task[] = DEFAULT_DAILY_ROUTINES.map((r) => ({
+        id: newId('task'),
+        kind: 'chore',
+        title: r.title,
+        notes: r.notes,
+        dueDate: null,
+        time: null,
+        priority: 2,
+        energy: r.energy,
+        status: 'open',
+        recurrence: { kind: 'daily', interval: 1, weekdays: null, dayOfMonth: null },
+        templateTaskId: null,
+        completedAt: null,
+        createdAt: ts,
+        updatedAt: ts,
+      }));
+      await db.tasks.bulkPut(routines);
+      await db.meta.put({ key: DAILY_ROUTINES_SEEDED, value: true, updatedAt: ts });
     }
   });
 }

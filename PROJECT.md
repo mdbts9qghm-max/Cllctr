@@ -403,6 +403,17 @@ erledigte bleibt als Verlauf stehen, sonst wäre nach einem Jahr nicht nachvollz
 oft etwas tatsächlich gemacht wurde. Monatliche Termine werden auf den Monatsletzten
 begrenzt, damit der 31. Januar nicht in den 3. März rutscht.
 
+### Vier Routinen ab Werk
+
+Damit die Liste nicht leer beginnt, legt die App vier tägliche Routinen selbst an:
+Supplements, 3 Liter trinken, Proteinziel, Mobility 10 Minuten. Bewusst nur Kleinigkeiten,
+die ohnehin jeden Tag anstehen und nichts kosten außer daran zu denken.
+
+Angelegt werden sie **nicht** über „Tabelle leer", sondern über eine eigene Markierung in
+`meta` (`seed.dailyRoutines.v1`). Das hat zwei Gründe: Eine Installation, in der schon
+Aufgaben liegen, bekommt sie einmalig nachgereicht — und wer eine davon löscht, bekommt sie
+nicht beim nächsten Start wieder.
+
 ### Tägliche Routinen sind keine Vorschläge
 
 Aufgaben mit täglicher Wiederholung laufen bewusst an der Vorschlagslogik vorbei und stehen
