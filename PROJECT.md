@@ -853,6 +853,26 @@ sofort „passt nicht" und im Detail den Umplanen-Knopf.
 
 ---
 
+## Urlaub: mehrere Tage auf einmal
+
+Abweichungen ließen sich nur Tag für Tag setzen. Bei zwei Wochen Urlaub sind das
+vierzehn Griffe — und genau dann lässt man es, der Plan rechnet weiter gegen die
+Rotation, und die Einheiten stapeln sich auf Doppeltagen, während daneben freie Tage
+leer stehen.
+
+Auf dem Schicht-Screen gibt es dafür jetzt **Mehrere Tage auf einmal**: von, bis,
+Schichtart. *Setzen* schreibt für jeden Tag im Zeitraum dieselbe Abweichung,
+*Abweichungen entfernen* nimmt sie wieder zurück. Der Knopf sagt, wie viele Tage
+betroffen sind, bevor man ihn drückt. Ein Ende vor dem Anfang wird nicht als Fehler
+gemeldet, sondern mitgezogen; mehr als 183 Tage am Stück lehnt das Formular ab.
+
+Wichtig für das Verständnis: **Urlaub erhöht das Volumen nicht.** Die Wochenziele
+bleiben 3× Kraft, 2× Laufen, 1× optional — mehr freie Tage heißen nur, dass sich
+dieselben Einheiten sauberer verteilen. Durchgespielt mit 14 Tagen Freischicht: eine
+Einheit pro Tag, ein Ruhetag je Zyklus, kein einziger Doppeltag im Urlaubszeitraum.
+
+---
+
 ## Entwicklung
 
 ```

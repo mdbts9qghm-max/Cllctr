@@ -9,7 +9,7 @@ import { capacityAllows, capacityExplanation, checkFeasibility, resolveShiftRang
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useSettings, useShiftContext } from '@/lib/hooks';
 import { CAPACITY_LABEL, CAPACITY_SHORT, type IsoDate } from '@/lib/types';
-import { ShiftPicker } from '@/components/ShiftPicker';
+import { ShiftPicker, ShiftRange } from '@/components/ShiftPicker';
 import { Button, CapacityBadge, Card, Field, inputClass, Notice, Section } from '@/components/ui';
 
 const PREVIEW_DAYS = 21;
@@ -178,6 +178,15 @@ export default function SchichtPage() {
             </Notice>
           ))}
         </div>
+      </Section>
+
+      <Section
+        title="Mehrere Tage auf einmal"
+        hint="Urlaub, Lehrgang, längere Krankheit — ein Block am Stück statt Tag für Tag. Überschreibt die Rotation für den ganzen Zeitraum."
+      >
+        <Card>
+          <ShiftRange shiftTypes={ctx.shiftTypes} />
+        </Card>
       </Section>
 
       <Section

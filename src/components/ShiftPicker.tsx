@@ -1,8 +1,11 @@
 'use client';
 
+import { useState } from 'react';
 import { db } from '@/lib/db';
+import { dateRange, daysBetween, formatShort, today } from '@/lib/dates';
 import { now } from '@/lib/ids';
 import type { IsoDate, ResolvedShiftDay, ShiftType } from '@/lib/types';
+import { Button, Field, inputClass } from './ui';
 
 /**
  * Einen einzelnen Tag abweichend von der Rotation setzen.
@@ -69,6 +72,117 @@ export function ShiftPicker({
           </button>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+/** Länger als ein halbes Jahr am Stück ist kein Urlaub mehr, sondern ein Tippfehler. */
+const MAX_RANGE_DAYS = 183;
+
+/**
+ * Mehrere Tage auf einmal abweichend setzen.
+ *
+ * Urlaub, Lehrgang, längere Krankheit: das sind zusammenhängende Blöcke. Sie
+ * Tag für Tag anzutippen ist bei zwei Wochen zwanzig Griffe — und genau dann
+ * lässt man es und der Plan rechnet gegen Schichten, die es nicht gibt.
+ */
+export function ShiftRange({ shiftTypes }: { shiftTypes: ShiftType[] }) {
+  const [from, setFrom] = useState<IsoDate>(today());
+  const [to, setTo] = useState<IsoDate>(today());
+  const [typeId, setTypeId] = useState<string>(
+    shiftTypes.find((t) => t.capacity === 'full')?.id ?? shiftTypes[0]?.id ?? '',
+  );
+  const [message, setMessage] = useState<string | null>(null);
+
+  const span = daysBetween(from, to) + 1;
+  const valid = span >= 1 && span <= MAX_RANGE_DAYS;
+
+  async function apply(clear: boolean) {
+    if (!valid) return;
+    const dates = dateRange(from, to);
+    if (clear) {
+      await db.shiftOverrides.bulkDelete(dates);
+      setMessage(`${dates.length} ${dates.length === 1 ? 'Tag' : 'Tage'} zurück auf die Rotation.`);
+      return;
+    }
+    const type = shiftTypes.find((t) => t.id === typeId);
+    if (!type) return;
+    const ts = now();
+    await db.shiftOverrides.bulkPut(
+      dates.map((date) => ({ date, shiftTypeId: typeId, note: '', createdAt: ts })),
+    );
+    setMessage(
+      `${dates.length} ${dates.length === 1 ? 'Tag' : 'Tage'} auf ${type.name} gesetzt: ` +
+        `${formatShort(from)} – ${formatShort(to)}.`,
+    );
+  }
+
+  return (
+    <div>
+      <div className="mb-3 grid grid-cols-2 gap-3">
+        <Field label="Von">
+          <input
+            type="date"
+            value={from}
+            onChange={(e) => {
+              setFrom(e.target.value);
+              // Ein Ende vor dem Anfang ergibt keinen Zeitraum — mitziehen
+              // statt eine Fehlermeldung zu zeigen.
+              if (e.target.value > to) setTo(e.target.value);
+              setMessage(null);
+            }}
+            className={inputClass}
+          />
+        </Field>
+        <Field label="Bis">
+          <input
+            type="date"
+            value={to}
+            min={from}
+            onChange={(e) => {
+              setTo(e.target.value);
+              setMessage(null);
+            }}
+            className={inputClass}
+          />
+        </Field>
+      </div>
+
+      <div className="mb-3">
+        <Field label="Schichtart">
+          <select
+            value={typeId}
+            onChange={(e) => {
+              setTypeId(e.target.value);
+              setMessage(null);
+            }}
+            className={inputClass}
+          >
+            {shiftTypes.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="primary" onClick={() => void apply(false)} disabled={!valid}>
+          {valid ? `${span} ${span === 1 ? 'Tag' : 'Tage'} setzen` : 'Zeitraum prüfen'}
+        </Button>
+        <Button onClick={() => void apply(true)} disabled={!valid}>
+          Abweichungen entfernen
+        </Button>
+      </div>
+
+      {message ? <p className="mt-3 text-xs leading-relaxed text-ok">{message}</p> : null}
+      {!valid ? (
+        <p className="mt-3 text-xs leading-relaxed text-ink-faint">
+          Der Zeitraum muss mit dem früheren Datum beginnen und darf höchstens {MAX_RANGE_DAYS}{' '}
+          Tage umfassen.
+        </p>
+      ) : null}
     </div>
   );
 }
