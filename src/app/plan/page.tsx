@@ -356,7 +356,17 @@ export default function PlanPage() {
                     const day = cycleDay;
                     const open = openId === session.id;
                     const dimmed = session.status === 'skipped' || session.status === 'missed';
-                    const isSecond = si > 0;
+                    // „↳ dazu" heißt Doppeltag — zwei Einheiten, die beide noch
+                    // anstehen. Eine verpasste oder gestrichene zählt dafür
+                    // nicht mit: sonst sieht ein Tag, auf den nach einer
+                    // Umplanung eine einzelne Einheit gerückt ist, aus wie ein
+                    // Doppeltag. Das Datum trägt deshalb die erste Einheit, die
+                    // wirklich noch ansteht.
+                    const active = (x: Session) => x.status !== 'skipped' && x.status !== 'missed';
+                    const firstActive = daySessions.findIndex(active);
+                    const showsDate = si === (firstActive >= 0 ? firstActive : 0);
+                    const isSecond =
+                      active(session) && daySessions.slice(0, si).some(active) && !showsDate;
                     // Nach einer nachträglich geänderten Schicht kann eine
                     // geplante Einheit an einem Tag stehen, der sie nicht trägt.
                     const conflict =
@@ -381,14 +391,14 @@ export default function PlanPage() {
                             {day.shiftType.short}
                           </span>
                           <span className="w-16 shrink-0 text-xs text-ink-muted tabular">
-                            {isSecond ? (
-                              <span className="text-ember">↳ dazu</span>
-                            ) : (
+                            {showsDate ? (
                               <>
                                 {weekdayShort(session.date)} {session.date.slice(8)}.
                                 {session.date.slice(5, 7)}.
                               </>
-                            )}
+                            ) : isSecond ? (
+                              <span className="text-ember">↳ dazu</span>
+                            ) : null}
                           </span>
                           {/* Kein "Doppeltag"-Etikett: die zweite Zeile sagt mit
                               "↳ dazu" ohnehin, was los ist, und das Wort drückt
