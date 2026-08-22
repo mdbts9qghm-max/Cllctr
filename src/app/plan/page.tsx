@@ -26,6 +26,8 @@ export default function PlanPage() {
   const ctx = useShiftContext();
   const settings = useSettings();
   const [busy, setBusy] = useState(false);
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const [loggingId, setLoggingId] = useState<string | null>(null);
   const [newRecords, setNewRecords] = useState<string[]>([]);
@@ -79,6 +81,7 @@ export default function PlanPage() {
         );
       }
       setMessage(parts.join(' '));
+      setConfirmRegenerate(false);
     } finally {
       setBusy(false);
     }
@@ -395,17 +398,49 @@ export default function PlanPage() {
         </div>
       </Section>
 
-      <Section title="Plan verwerfen" hint="Löscht alle geplanten Einheiten. Protokollierte bleiben erhalten.">
+      <Section
+        title="Plan neu erzeugen"
+        hint="Nach einer Änderung an Schichtarten, Rotation oder Wochenzielen. Protokollierte Einheiten bleiben erhalten — nur die noch geplanten werden ersetzt."
+      >
         <Card>
-          <Button
-            variant="danger"
-            onClick={async () => {
-              await clearActivePlan();
-              setMessage('Plan gelöscht.');
-            }}
-          >
-            Plan löschen
-          </Button>
+          {confirmRegenerate ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm text-ink">
+                Alle noch geplanten Einheiten werden ersetzt.
+              </span>
+              <Button variant="primary" onClick={() => void generate()} disabled={busy}>
+                {busy ? 'Erzeuge …' : 'Ja, neu erzeugen'}
+              </Button>
+              <Button onClick={() => setConfirmRegenerate(false)}>Abbrechen</Button>
+            </div>
+          ) : (
+            <Button variant="primary" onClick={() => setConfirmRegenerate(true)}>
+              Plan neu erzeugen
+            </Button>
+          )}
+
+          <div className="mt-4 border-t border-line pt-4">
+            {confirmDelete ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm text-ink">Plan wirklich löschen?</span>
+                <Button
+                  variant="danger"
+                  onClick={async () => {
+                    await clearActivePlan();
+                    setConfirmDelete(false);
+                    setMessage('Plan gelöscht.');
+                  }}
+                >
+                  Ja, löschen
+                </Button>
+                <Button onClick={() => setConfirmDelete(false)}>Abbrechen</Button>
+              </div>
+            ) : (
+              <Button variant="danger" onClick={() => setConfirmDelete(true)}>
+                Plan löschen
+              </Button>
+            )}
+          </div>
         </Card>
       </Section>
     </>

@@ -668,6 +668,18 @@ Plan ist weg — die zweite Zeile sagt mit „↳ dazu" ohnehin, was los ist.
 
 ---
 
+## Plan neu erzeugen
+
+Ganz unten auf dem Plan-Screen. Vorher musste man den Plan erst löschen, damit der
+Erzeugen-Knopf wieder auftauchte — zwei Schritte, davon einer rot als Gefahr markiert,
+obwohl das Neuerzeugen der normale Weg nach einer Einstellungsänderung ist.
+
+Jetzt: **Plan neu erzeugen** mit einer Rückfrage, darunter abgesetzt weiterhin
+*Plan löschen*. Beide lassen protokollierte Einheiten unangetastet — nur die noch
+geplanten werden ersetzt.
+
+---
+
 ## Konflikte nach einem Schichttausch
 
 Trägt man eine Schicht nachträglich ein — Tausch, Krankheit, kurzfristige V-Schicht —,
