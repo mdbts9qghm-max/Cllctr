@@ -6,7 +6,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 import { addDays, formatShort, today, weekdayShort } from '@/lib/dates';
 import { useSettings, useShiftContext } from '@/lib/hooks';
-import { capacityAllows, capacityExplanation, resolveShiftDay, resolveShiftRange } from '@/lib/shifts';
+import { capacityAllows, resolveShiftDay, resolveShiftRange } from '@/lib/shifts';
 import { blockStatus, explainRestDay, explainSession } from '@/lib/explain';
 import { applyRescheduleProposal, buildRescheduleProposal, markSessionMissed } from '@/lib/plan-store';
 import { appointmentsOn, suggestTasks, taskEnergyBudget, tasksBlockedByEnergy } from '@/lib/tasks';
@@ -241,11 +241,6 @@ export default function HeutePage() {
           </Notice>
         )}
 
-        {todaySessions.length === 0 && data.hasPlan ? (
-          <p className="mt-2 text-xs leading-relaxed text-ink-faint">
-            {capacityExplanation(day)}
-          </p>
-        ) : null}
       </section>
 
       {/* 2 — Aufgaben, passend zur Energie des Tages */}

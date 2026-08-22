@@ -32,7 +32,12 @@ Diese Entscheidungen prägen das gesamte Datenmodell. Ändern sie sich, ändert 
 | Nachtschicht | 19:00–07:00 | `moderate` | Der Vormittag vor der Schicht ist frei: normales Volumen inklusive Kraft |
 | Schlaftag | Schlaf 08:00–14:00 | `moderate` | Ab ca. 15:00 normales Volumen, keine Key-Session |
 | Freischicht | ganzer Tag | `full` | Hier liegen die harten Einheiten |
-| V-Schicht | 08:00–20:00 | `light` | Kommt kurzfristig vor einer Tagschicht — **nicht** Teil der Rotation, wird als Abweichung gesetzt |
+| V-Schicht | 08:00–20:00 | `light` | Laufen geht **während** der Schicht, ins Gym kommt man dabei nicht. Nicht Teil der Rotation — wird als Abweichung gesetzt |
+
+Die V-Schicht bleibt trainierbar, aber nur laufend: `allowStrengthOnLightDays` steht
+deshalb auf **aus**. Weil sie inzwischen die einzige Schichtart mit lockerer Kapazität ist,
+wirkt diese eine Einstellung genau dort — der Generator schlägt an einem V-Tag einen
+Recovery Run vor, nie eine Krafteinheit, und der Umplaner schiebt auch keine dorthin.
 
 Nach der Tagschicht ist kein Training mehr vorgesehen. Damit liefert die Rotation pro
 Woche 2,8 volle und 2,8 halbe Tage; das Urteil bleibt **passt**, das erzeugte Volumen

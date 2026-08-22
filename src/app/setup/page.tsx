@@ -257,11 +257,11 @@ export default function SetupPage() {
               className="mt-1 size-4 accent-[#e0a43c]"
             />
             <span className="text-sm leading-relaxed text-ink">
-              Kurze Krafteinheiten an Schichttagen zulassen
+              Kurze Krafteinheiten an lockeren Tagen zulassen
               <span className="mt-0.5 block text-xs text-ink-faint">
-                35 Minuten nach der Schicht. Ohne das erreicht die Rotation dein Kraftziel von{' '}
-                {settings.weeklyTargets.strength}×/Woche nicht — es kämen nur rund 1,5 Einheiten
-                zusammen.
+                35 Minuten an Tagen mit der Kapazität „Nur locker". Betrifft aktuell nur die
+                V-Schicht — dort geht Laufen während der Schicht, aber man kommt nicht ins Gym.
+                Deshalb standardmäßig aus.
               </span>
             </span>
           </label>

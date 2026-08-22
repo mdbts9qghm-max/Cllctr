@@ -121,11 +121,28 @@ export function capacityAllows(capacity: TrainingCapacity, type: SessionTypeKey)
   return CAPACITY_RANK[capacity] >= CAPACITY_RANK[SESSION_TYPES[type].minCapacity];
 }
 
-/** Alle Session-Typen, die an diesem Tag möglich wären. */
-export function allowedSessionTypes(capacity: TrainingCapacity): SessionTypeKey[] {
-  return (Object.keys(SESSION_TYPES) as SessionTypeKey[]).filter((key) =>
-    capacityAllows(capacity, key),
-  );
+/**
+ * Alle Session-Typen, die an diesem Tag möglich wären.
+ *
+ * `allowStrengthOnLightDays` wird mitgeführt, damit die Anzeige nicht etwas
+ * verspricht, das der Generator ohnehin nie einplant — an der V-Schicht geht
+ * Laufen während der Schicht, aber man kommt nicht ins Gym.
+ */
+export function allowedSessionTypes(
+  capacity: TrainingCapacity,
+  allowStrengthOnLightDays = true,
+): SessionTypeKey[] {
+  return (Object.keys(SESSION_TYPES) as SessionTypeKey[]).filter((key) => {
+    if (!capacityAllows(capacity, key)) return false;
+    if (
+      capacity === 'light' &&
+      !allowStrengthOnLightDays &&
+      SESSION_TYPES[key].discipline === 'strength'
+    ) {
+      return false;
+    }
+    return true;
+  });
 }
 
 /**

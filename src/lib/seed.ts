@@ -76,9 +76,9 @@ export const DEFAULT_SHIFT_TYPES: ShiftType[] = [
     endTime: '20:00',
     crossesMidnight: false,
     capacity: 'light',
-    trainingWindow: 'ab ca. 21:00',
+    trainingWindow: 'während der Schicht',
     color: '#f97316',
-    note: 'Willkürlich 08:00–20:00, kann kurzfristig vor einer Tagschicht liegen. Gehört deshalb nicht in die Rotation — sie wird auf dem Schicht-Screen als Abweichung für den betroffenen Tag gesetzt.',
+    note: 'Willkürlich 08:00–20:00, kann kurzfristig vor einer Tagschicht liegen. Gehört deshalb nicht in die Rotation — sie wird auf dem Schicht-Screen als Abweichung für den betroffenen Tag gesetzt. Laufen geht während der Schicht, ins Gym kommt man dabei nicht.',
     isBuiltIn: true,
     sortOrder: 5,
   },
@@ -124,7 +124,9 @@ export function defaultSettings(): Settings {
     restHr: 49,
     weeklyTargets: { strength: 3, run: 2, optional: 1 },
     planningProfile: 'runFirst',
-    allowStrengthOnLightDays: true,
+    // Aus: Die V-Schicht ist die einzige Schichtart mit lockerer Kapazität, und
+    // dort geht Laufen während der Schicht — aber kein Gym.
+    allowStrengthOnLightDays: false,
     allowDoubleDayPerCycle: true,
     mesoLoadCycles: 4,
     mesoDeloadCycles: 1,
