@@ -70,7 +70,7 @@ function totalMinutes(ctx: SoulContext): number {
   return completedLogs(ctx).reduce((sum, x) => sum + (x.log.durationMin ?? 0), 0);
 }
 
-export type CycleVerdict = 'clean' | 'broken' | 'running';
+export type CycleVerdict = 'clean' | 'broken' | 'running' | 'paused';
 
 /**
  * War dieser Zyklus sauber?
@@ -85,6 +85,11 @@ export function cycleVerdict(micro: Microcycle, sessions: Session[], today: IsoD
 
   const own = sessions.filter((s) => s.microcycleId === micro.id);
   if (own.length === 0) return 'running';
+
+  // Ist in diesem Zyklus alles gestrichen worden — Krankheit, Abwesenheit —,
+  // dann gab es nichts zu halten. Ein solcher Zyklus verdient keine Seele, darf
+  // die Serie aber auch nicht brechen: eine Grippe ist kein Versäumnis.
+  if (own.every((s) => s.status === 'skipped')) return 'paused';
 
   const done = own.filter((s) => s.status === 'done');
   if (done.length === 0) return 'broken';
@@ -105,7 +110,11 @@ export function currentStreak(ctx: SoulContext): number {
 
   let streak = 0;
   for (let i = finished.length - 1; i >= 0; i--) {
-    if (cycleVerdict(finished[i], ctx.sessions, ctx.today) === 'clean') streak++;
+    const verdict = cycleVerdict(finished[i], ctx.sessions, ctx.today);
+    // Ein ausgesetzter Zyklus zählt nicht mit, unterbricht die Serie aber auch
+    // nicht — sie läuft dahinter weiter.
+    if (verdict === 'paused') continue;
+    if (verdict === 'clean') streak++;
     else break;
   }
   return streak;

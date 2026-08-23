@@ -48,8 +48,12 @@ export function SessionCard({
   session: Session;
   explanation: SessionExplanation;
   onMissed: (session: Session) => void;
-  /** Gesetzt, wenn der Tag diese Einheit nicht mehr trägt. */
-  conflict?: { reason: string; onReplan: () => void } | null;
+  /**
+   * Gesetzt, wenn der Tag diese Einheit nicht mehr trägt. `actionLabel` sagt,
+   * was dagegen hilft — bei einer Abwesenheit ist das Streichen, sonst
+   * Umplanen.
+   */
+  conflict?: { reason: string; actionLabel?: string; onReplan: () => void } | null;
   defaultExpanded?: boolean;
 }) {
   const [logging, setLogging] = useState(false);
@@ -72,7 +76,7 @@ export function SessionCard({
           <p className="mt-1 text-sm leading-relaxed text-ink">{conflict.reason}</p>
           <div className="mt-2">
             <Button variant="primary" onClick={conflict.onReplan}>
-              Umplanen
+              {conflict.actionLabel ?? 'Umplanen'}
             </Button>
           </div>
         </div>

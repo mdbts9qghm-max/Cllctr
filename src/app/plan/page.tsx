@@ -9,6 +9,7 @@ import { capacityAllows, capacityExplanation, resolveShiftDay, resolveShiftRange
 import {
   applyRescheduleProposal,
   buildRescheduleProposal,
+  cancelSession,
   clearActivePlan,
   createAndSavePlan,
   markSessionMissed,
@@ -449,12 +450,31 @@ export default function PlanPage() {
                                   Passt nicht mehr
                                 </p>
                                 <p className="mt-1 text-sm leading-relaxed text-ink">
-                                  {day.shiftType.name} an diesem Tag trägt {session.title} nicht.
+                                  {day.shiftType.cancelsPlanned
+                                    ? `${day.shiftType.name} an diesem Tag — nachholen wäre hier die falsche Reaktion.`
+                                    : `${day.shiftType.name} an diesem Tag trägt ${session.title} nicht.`}
                                 </p>
                                 <div className="mt-2">
-                                  <Button variant="primary" onClick={() => void handleMissed(session)}>
-                                    Umplanen
-                                  </Button>
+                                  {day.shiftType.cancelsPlanned ? (
+                                    <Button
+                                      variant="primary"
+                                      onClick={() =>
+                                        void cancelSession(
+                                          session.id,
+                                          `${day.shiftType.name} — die Einheit entfällt ersatzlos.`,
+                                        )
+                                      }
+                                    >
+                                      Einheit streichen
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      variant="primary"
+                                      onClick={() => void handleMissed(session)}
+                                    >
+                                      Umplanen
+                                    </Button>
+                                  )}
                                 </div>
                               </div>
                             ) : null}

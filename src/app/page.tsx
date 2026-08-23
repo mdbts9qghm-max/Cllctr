@@ -8,7 +8,12 @@ import { addDays, formatShort, today, weekdayShort } from '@/lib/dates';
 import { useSettings, useShiftContext } from '@/lib/hooks';
 import { capacityAllows, resolveShiftDay, resolveShiftRange } from '@/lib/shifts';
 import { blockStatus, explainRestDay, explainSession } from '@/lib/explain';
-import { applyRescheduleProposal, buildRescheduleProposal, markSessionMissed } from '@/lib/plan-store';
+import {
+  applyRescheduleProposal,
+  buildRescheduleProposal,
+  cancelSession,
+  markSessionMissed,
+} from '@/lib/plan-store';
 import {
   appointmentsOn,
   dailyTasks,
@@ -215,10 +220,20 @@ export default function HeutePage() {
                 conflict={
                   fits(session)
                     ? null
-                    : {
-                        reason: `${day.shiftType.name} lässt das heute nicht mehr zu.`,
-                        onReplan: () => void handleMissed(session),
-                      }
+                    : day.shiftType.cancelsPlanned
+                      ? {
+                          reason: `${day.shiftType.name} — heute wird nicht trainiert.`,
+                          actionLabel: 'Einheit streichen',
+                          onReplan: () =>
+                            void cancelSession(
+                              session.id,
+                              `${day.shiftType.name} — die Einheit entfällt ersatzlos.`,
+                            ),
+                        }
+                      : {
+                          reason: `${day.shiftType.name} lässt das heute nicht mehr zu.`,
+                          onReplan: () => void handleMissed(session),
+                        }
                 }
               />
             ))}

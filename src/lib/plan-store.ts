@@ -16,9 +16,10 @@ import {
   type ReschedulePlan,
   type RescheduleContext,
 } from './replan';
-import { progresses, type ProgressionLevels } from './progression';
+import { progresses, sessionForm, type ProgressionLevels } from './progression';
 import type { ShiftContext } from './shifts';
-import type { Session, SessionFeeling, SessionLog, Settings } from './types';
+import { SESSION_TYPES } from './types';
+import type { IsoDate, Session, SessionFeeling, SessionLog, Settings } from './types';
 
 /**
  * Schreibt den Stufenstand fort und gibt ihn zurück.
@@ -172,6 +173,7 @@ export async function getSessionLog(sessionId: string): Promise<SessionLog | und
 /** Setzt eine Einheit zurück auf geplant. */
 export async function resetSessionStatus(sessionId: string): Promise<void> {
   await db.sessions.update(sessionId, { status: 'planned', updatedAt: now() });
+  await relevelPlannedProgression();
 }
 
 export async function toggleSessionLock(sessionId: string, locked: boolean): Promise<void> {
@@ -211,11 +213,124 @@ export async function applyRescheduleProposal(plan: ReschedulePlan): Promise<voi
     const updated = applyRescheduleToSessions(present, plan);
     await db.sessions.bulkPut(updated);
   });
+
+  await relevelPlannedProgression();
+}
+
+/**
+ * Nummeriert die Stufen der noch geplanten Einheiten neu durch.
+ *
+ * Nötig, sobald eine Einheit ausfällt: sonst rutscht die nächste desselben Typs
+ * um eine Stufe nach oben, obwohl die darunter nie trainiert wurde. Nach einer
+ * Krankheitswoche stünde man plötzlich zwei Stufen weiter als je gelaufen —
+ * genau das Gegenteil von "die Stufe wird verdient".
+ *
+ * Was zählt: erledigte Einheiten schieben die Stufe hoch und behalten ihre
+ * eigene, denn sie sind Verlauf und werden nicht rückwirkend umgeschrieben.
+ * Gestrichene und verpasste zählen nicht. Deload-Einheiten fahren die aktuelle
+ * Stufe, ohne sie zu erhöhen — wie beim Erzeugen des Plans.
+ */
+async function relevelPlannedProgression(): Promise<void> {
+  const settings = await db.settings.get('singleton');
+  if (!settings) return;
+
+  const base = settings.progressionBase ?? {};
+  const micros = await db.microcycles.toArray();
+  const microById = new Map(micros.map((m) => [m.id, m]));
+
+  const all = (await db.sessions.toArray())
+    .filter((s) => microById.has(s.microcycleId))
+    .sort(
+      (a, b) => a.date.localeCompare(b.date) || a.orderInDay - b.orderInDay,
+    );
+
+  const ts = now();
+  const updated: Session[] = [];
+
+  for (const type of Object.keys(SESSION_TYPES) as Array<Session['type']>) {
+    if (!progresses(type)) continue;
+
+    let step = base[type] ?? 0;
+
+    for (const session of all) {
+      if (session.type !== type) continue;
+      const isDeload = microById.get(session.microcycleId)?.isDeload ?? false;
+
+      if (session.status === 'done') {
+        // Verlauf bleibt stehen; die Stufe geht dahinter weiter.
+        step = Math.max(step, (session.progressionStep ?? step) + (isDeload ? 0 : 1));
+        continue;
+      }
+      if (session.status === 'skipped' || session.status === 'missed') continue;
+
+      const form = sessionForm(type, settings.hrZones, step, isDeload);
+      if (session.progressionStep !== step) {
+        updated.push({
+          ...session,
+          progressionStep: step,
+          progressionNote: form.note,
+          plannedDurationMin: form.durationMin,
+          targetRpe: form.targetRpe,
+          content: form.content,
+          updatedAt: ts,
+        });
+      }
+      if (!isDeload) step++;
+    }
+  }
+
+  if (updated.length > 0) await db.sessions.bulkPut(updated);
+}
+
+/**
+ * Streicht eine Einheit ersatzlos, mit Begründung.
+ *
+ * Bewusst `skipped` und nicht `missed`: eine gestrichene Einheit ist eine
+ * Entscheidung, keine liegengelassene. Nur `missed` bricht die Serie.
+ */
+export async function cancelSession(sessionId: string, reason: string): Promise<void> {
+  await db.sessions.update(sessionId, {
+    status: 'skipped',
+    rescheduleReason: reason,
+    updatedAt: now(),
+  });
+  await relevelPlannedProgression();
+}
+
+/**
+ * Streicht alle noch geplanten Einheiten in einem Zeitraum.
+ *
+ * Der Anlass ist immer derselbe: ein Block, an dem nicht trainiert wird, wurde
+ * nachträglich eingetragen. Gibt die Anzahl zurück, damit die Oberfläche sagen
+ * kann, was passiert ist.
+ */
+export async function cancelSessionsInRange(
+  from: IsoDate,
+  to: IsoDate,
+  reason: string,
+): Promise<number> {
+  const affected = (await db.sessions.toArray()).filter(
+    (s) => s.status === 'planned' && s.date >= from && s.date <= to,
+  );
+  if (affected.length === 0) return 0;
+
+  const ts = now();
+  await db.sessions.bulkPut(
+    affected.map((s) => ({
+      ...s,
+      status: 'skipped' as const,
+      rescheduleReason: reason,
+      updatedAt: ts,
+    })),
+  );
+  await relevelPlannedProgression();
+  return affected.length;
 }
 
 /** Markiert als verpasst, ohne umzuplanen — für den Fall, dass der Vorschlag verworfen wird. */
 export async function markSessionMissed(sessionId: string): Promise<void> {
   await db.sessions.update(sessionId, { status: 'missed', updatedAt: now() });
+  await relevelPlannedProgression();
 }
 
 /** Die heutige Einheit, falls es eine gibt. */

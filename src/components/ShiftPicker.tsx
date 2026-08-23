@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { db } from '@/lib/db';
 import { dateRange, daysBetween, formatShort, today } from '@/lib/dates';
 import { now } from '@/lib/ids';
+import { cancelSessionsInRange } from '@/lib/plan-store';
 import type { IsoDate, ResolvedShiftDay, ShiftType } from '@/lib/types';
 import { Button, Field, inputClass } from './ui';
 
@@ -111,10 +112,28 @@ export function ShiftRange({ shiftTypes }: { shiftTypes: ShiftType[] }) {
     await db.shiftOverrides.bulkPut(
       dates.map((date) => ({ date, shiftTypeId: typeId, note: '', createdAt: ts })),
     );
-    setMessage(
+
+    const parts = [
       `${dates.length} ${dates.length === 1 ? 'Tag' : 'Tage'} auf ${type.name} gesetzt: ` +
         `${formatShort(from)} – ${formatShort(to)}.`,
-    );
+    ];
+
+    // Bei einer Abwesenheit gleich mit aufräumen: die Einheiten stehen sonst
+    // als Konflikte im Plan und man müsste jede einzeln wegklicken.
+    if (type.cancelsPlanned) {
+      const struck = await cancelSessionsInRange(
+        from,
+        to,
+        `${type.name} — die Einheit entfällt ersatzlos.`,
+      );
+      parts.push(
+        struck === 0
+          ? 'Im Zeitraum stand nichts Geplantes.'
+          : `${struck} geplante ${struck === 1 ? 'Einheit' : 'Einheiten'} gestrichen — sie zählen nicht als verpasst.`,
+      );
+    }
+
+    setMessage(parts.join(' '));
   }
 
   return (

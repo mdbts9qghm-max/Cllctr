@@ -873,6 +873,71 @@ Einheit pro Tag, ein Ruhetag je Zyklus, kein einziger Doppeltag im Urlaubszeitra
 
 ---
 
+## Urlaub und Krank
+
+Bis hierher ließ sich Abwesenheit nur als „Freischicht" eintragen. Für Urlaub geht das
+gerade noch — für Krankheit nicht: eine Freischicht ist ein voller Tag, und der Plan
+legte dort prompt eine Key-Session hin.
+
+Beides sind jetzt eigene Schichtarten, bewusst **neben** den Schichten statt in einem
+eigenen Konzept. Für die Planung ist die einzige Frage, was an einem Tag geht — und
+damit funktionieren Rotation überschreiben, Zeitraum setzen und Konflikterkennung
+unverändert weiter.
+
+| | Kapazität | Besonderheit |
+|---|---|---|
+| **Urlaub** | voll | wie eine Freischicht; mehr freie Tage heißen nicht mehr Training |
+| **Krank** | keine | geplante Einheiten **entfallen**, statt umgeplant zu werden |
+
+### Der Unterschied ist die Absicht, nicht die Kapazität
+
+Eine Tagschicht und ein Krankheitstag tragen beide kein Training. Trotzdem will man
+Gegensätzliches: fällt ein freier Tag einer Tagschicht zum Opfer, soll die Einheit
+gerettet werden; ist man krank, soll sie weg — sie am nächsten Tag nachzuholen wäre
+genau die falsche Reaktion.
+
+Dafür trägt `ShiftType` jetzt `cancelsPlanned`. Ist die Marke gesetzt, heißt der Knopf
+am Konflikt **Einheit streichen** statt *Umplanen*, und beim Setzen eines Zeitraums
+werden die Einheiten darin gleich mit gestrichen — sonst stünden sie als Konflikte im
+Plan und man müsste jeden einzeln wegklicken. Die Marke ist unter Setup → Schichtarten
+für jede Art umschaltbar.
+
+Gestrichen heißt `skipped` mit Begründung, nicht `missed`: eine gestrichene Einheit ist
+eine Entscheidung, keine liegengelassene. Nur `missed` bricht die Serie.
+
+### Krank darf die Steigerung nicht nach oben schieben
+
+Der eigentliche Fallstrick. Fällt eine Einheit aus, ist die nächste desselben Typs im
+Plan bereits eine Stufe höher — nach einer Krankheitswoche stünde man zwei Stufen
+weiter, als je trainiert wurde. Das ist das Gegenteil von „die Stufe wird verdient".
+
+`relevelPlannedProgression()` nummeriert deshalb nach jedem Statuswechsel die noch
+geplanten Einheiten neu durch: Erledigte schieben die Stufe hoch und behalten ihre
+eigene (Verlauf wird nicht rückwirkend umgeschrieben), Gestrichene und Verpasste zählen
+nicht, Deload-Einheiten fahren die aktuelle Stufe ohne sie zu erhöhen — dieselbe Regel
+wie beim Erzeugen. Läuft nach *streichen*, *verpasst*, *zurück auf geplant* und nach
+einer angewandten Umplanung.
+
+Durchgespielt: Plan erzeugt, alle Arten auf Stufe 0 → 7 Tage Krank gesetzt, 6 Einheiten
+gestrichen → alle Arten stehen weiter auf Stufe 0.
+
+### Eine ausgefallene Woche bricht die Serie nicht
+
+`cycleVerdict` kannte nur *clean*, *broken*, *running*. Ein Zyklus, in dem alles
+gestrichen wurde, fiel unter „broken" (`done.length === 0`) — eine Grippe hätte die
+Serie zerrissen. Neu ist `paused`: sind **alle** Einheiten eines abgeschlossenen Zyklus
+gestrichen, verdient er keine Seele, unterbricht die Serie aber auch nicht.
+`currentStreak` überspringt ihn, statt abzubrechen.
+
+Geprüft mit drei Zyklen (sauber / komplett gestrichen / sauber): Serie 2. Dieselben
+Daten mit einer *verpassten* statt gestrichenen Einheit: Serie 1.
+
+Schema auf Version 6: `ShiftType.cancelsPlanned`. Bestehende Installationen bekommen
+Urlaub und Krank über die Markierung `seed.absenceShifts.v1` nachgereicht — wer sie
+löscht, bekommt sie nicht wieder aufgedrängt.
+
+---
+
 ## Entwicklung
 
 ```

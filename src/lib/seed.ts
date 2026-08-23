@@ -19,6 +19,47 @@ import {
   type TaskEnergy,
 } from './types';
 
+/**
+ * Abwesenheiten — keine Schichten, aber sie belegen einen Tag genauso.
+ *
+ * Sie stehen bewusst neben den Schichtarten statt in einem eigenen Konzept:
+ * Für die Planung ist die einzige Frage, was an einem Tag geht. Urlaub ist ein
+ * voller Tag, Krankheit ist keiner. Alles andere — Rotation überschreiben,
+ * Zeitraum setzen, Konflikte erkennen — funktioniert damit unverändert.
+ */
+export const ABSENCE_SHIFT_TYPES: ShiftType[] = [
+  {
+    id: 'urlaub',
+    name: 'Urlaub',
+    short: 'U',
+    startTime: null,
+    endTime: null,
+    crossesMidnight: false,
+    capacity: 'full',
+    trainingWindow: 'ganzer Tag',
+    color: '#14b8a6',
+    note: 'Ganzer Tag frei. Zählt wie eine Freischicht — mehr freie Tage heißen aber nicht mehr Training, sondern nur, dass sich dieselben Einheiten sauberer verteilen.',
+    cancelsPlanned: false,
+    isBuiltIn: true,
+    sortOrder: 6,
+  },
+  {
+    id: 'krank',
+    name: 'Krank',
+    short: 'K',
+    startTime: null,
+    endTime: null,
+    crossesMidnight: false,
+    capacity: 'none',
+    trainingWindow: null,
+    color: '#a1a1aa',
+    note: 'Kein Training. Geplante Einheiten an diesen Tagen entfallen ersatzlos, statt auf den nächsten Tag zu rutschen — nachholen wäre hier genau die falsche Reaktion. Sie zählen auch nicht als verpasst.',
+    cancelsPlanned: true,
+    isBuiltIn: true,
+    sortOrder: 7,
+  },
+];
+
 export const DEFAULT_SHIFT_TYPES: ShiftType[] = [
   {
     id: 'tag',
@@ -31,6 +72,7 @@ export const DEFAULT_SHIFT_TYPES: ShiftType[] = [
     trainingWindow: null,
     color: '#eab308',
     note: '12 Stunden. Danach ist nichts mehr drin — der Tag ist ein Ruhetag.',
+    cancelsPlanned: false,
     isBuiltIn: true,
     sortOrder: 1,
   },
@@ -45,6 +87,7 @@ export const DEFAULT_SHIFT_TYPES: ShiftType[] = [
     trainingWindow: 'vormittags, vor der Schicht',
     color: '#6366f1',
     note: 'Der Vormittag vor der Schicht ist frei: normales Volumen inklusive Kraft geht, nur nichts, was den Schlaf davor frisst.',
+    cancelsPlanned: false,
     isBuiltIn: true,
     sortOrder: 2,
   },
@@ -59,6 +102,7 @@ export const DEFAULT_SHIFT_TYPES: ShiftType[] = [
     trainingWindow: 'ab ca. 15:00',
     color: '#0ea5e9',
     note: 'Tag nach der Nachtschicht, Schlaf 08:00–14:00. Nachmittags normales Volumen, keine Key-Session.',
+    cancelsPlanned: false,
     isBuiltIn: true,
     sortOrder: 3,
   },
@@ -73,6 +117,7 @@ export const DEFAULT_SHIFT_TYPES: ShiftType[] = [
     trainingWindow: 'ganzer Tag',
     color: '#22c55e',
     note: 'Kompletter Tag frei. Hier liegen die Key-Sessions.',
+    cancelsPlanned: false,
     isBuiltIn: true,
     sortOrder: 4,
   },
@@ -87,9 +132,11 @@ export const DEFAULT_SHIFT_TYPES: ShiftType[] = [
     trainingWindow: 'während der Schicht',
     color: '#f97316',
     note: 'Willkürlich 08:00–20:00, kann kurzfristig vor einer Tagschicht liegen. Gehört deshalb nicht in die Rotation — sie wird auf dem Schicht-Screen als Abweichung für den betroffenen Tag gesetzt. Laufen geht während der Schicht, ins Gym kommt man dabei nicht.',
+    cancelsPlanned: false,
     isBuiltIn: true,
     sortOrder: 5,
   },
+  ...ABSENCE_SHIFT_TYPES,
 ];
 
 /**
@@ -134,6 +181,7 @@ const DEFAULT_DAILY_ROUTINES: Array<{ title: string; notes: string; energy: Task
  * angelegt wurden. Ohne ihn kämen sie nach jedem Löschen wieder — mit ihm
  * bekommt auch eine bestehende Installation sie einmalig nachgereicht.
  */
+const ABSENCE_SHIFTS_SEEDED = 'seed.absenceShifts.v1';
 const DAILY_ROUTINES_SEEDED = 'seed.dailyRoutines.v1';
 
 export function defaultSettings(): Settings {
@@ -205,6 +253,15 @@ export async function seedIfEmpty(): Promise<void> {
     }
     if ((await db.shiftTypes.count()) === 0) {
       await db.shiftTypes.bulkPut(DEFAULT_SHIFT_TYPES);
+      await db.meta.put({ key: ABSENCE_SHIFTS_SEEDED, value: true, updatedAt: now() });
+    } else if (!(await db.meta.get(ABSENCE_SHIFTS_SEEDED))) {
+      // Urlaub und Krank kamen später dazu. An eine Markierung gekoppelt statt
+      // an "Tabelle leer": so bekommt sie auch eine bestehende Installation —
+      // und wer sie löscht, bekommt sie nicht wieder aufgedrängt.
+      const existing = new Set((await db.shiftTypes.toArray()).map((t) => t.id));
+      const missing = ABSENCE_SHIFT_TYPES.filter((t) => !existing.has(t.id));
+      if (missing.length > 0) await db.shiftTypes.bulkPut(missing);
+      await db.meta.put({ key: ABSENCE_SHIFTS_SEEDED, value: true, updatedAt: now() });
     }
     if ((await db.shiftPatterns.count()) === 0) {
       await db.shiftPatterns.put(defaultPattern());

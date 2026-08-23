@@ -12,7 +12,7 @@ export type IsoDate = string;
 export type IsoDateTime = string;
 
 /** Version des Schemas im Export. Wird bei jeder Änderung am Modell hochgezählt. */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 /* ------------------------------------------------------------------ */
 /* Schicht                                                             */
@@ -67,6 +67,16 @@ export interface ShiftType {
   /** Tailwind-taugliche Hex-Farbe für die Kalenderansicht. */
   color: string;
   note: string;
+  /**
+   * Abwesenheit: geplante Einheiten an solchen Tagen **entfallen**, statt
+   * umgeplant zu werden.
+   *
+   * Der Unterschied zu einer Schicht ohne Kapazität ist die Absicht. Fällt ein
+   * freier Tag einer Tagschicht zum Opfer, will man die Einheit retten. Ist man
+   * krank, will man sie loswerden — sie am nächsten Tag nachzuholen wäre genau
+   * die falsche Reaktion.
+   */
+  cancelsPlanned: boolean;
   /** Standardarten können nicht gelöscht werden, nur bearbeitet. */
   isBuiltIn: boolean;
   sortOrder: number;

@@ -428,6 +428,24 @@ export default function SetupPage() {
                 </Field>
               </div>
 
+              <label className="mt-3 flex items-start gap-2.5 text-sm text-ink">
+                <input
+                  type="checkbox"
+                  checked={t.cancelsPlanned}
+                  onChange={(e) =>
+                    void db.shiftTypes.update(t.id, { cancelsPlanned: e.target.checked })
+                  }
+                  className="mt-0.5 size-4 shrink-0 accent-ember"
+                />
+                <span>
+                  Abwesenheit
+                  <span className="block text-xs leading-relaxed text-ink-faint">
+                    Geplante Einheiten an solchen Tagen entfallen ersatzlos, statt umgeplant zu
+                    werden — und zählen nicht als verpasst.
+                  </span>
+                </span>
+              </label>
+
               {t.note ? (
                 <p className="mt-2 text-xs leading-relaxed text-ink-faint">{t.note}</p>
               ) : null}
