@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 import { getSessionLog, logSession, type QuickLog } from '@/lib/plan-store';
@@ -44,6 +44,43 @@ export function SessionLogForm({
   const [feeling, setFeeling] = useState<SessionFeeling | null>(null);
   const [note, setNote] = useState('');
   const [sets, setSets] = useState<SetRow[]>([]);
+
+  /**
+   * Was bereits protokolliert wurde.
+   *
+   * Ohne das startet "Protokoll bearbeiten" wieder bei den Planwerten — es
+   * sieht dann so aus, als wäre nichts gespeichert worden, und beim Speichern
+   * überschreibt man seine eigenen Zahlen mit den Vorgaben.
+   */
+  const saved = useLiveQuery(async () => {
+    const log = await getSessionLog(session.id);
+    const entries = log
+      ? await db.setEntries.where('sessionLogId').equals(log.id).toArray()
+      : [];
+    return { log: log ?? null, entries };
+  }, [session.id]);
+
+  // Nur einmal übernehmen: sonst würde jede Änderung im Formular beim nächsten
+  // Lauf des LiveQuery wieder zurückgesetzt.
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (seeded.current || !saved) return;
+    seeded.current = true;
+    if (!saved.log) return;
+
+    setRpe(saved.log.rpe);
+    setDuration(saved.log.durationMin === null ? '' : String(saved.log.durationMin));
+    setDistance(saved.log.distanceKm === null ? '' : String(saved.log.distanceKm).replace('.', ','));
+    setFeeling(saved.log.feeling);
+    setNote(saved.log.note);
+    setSets(
+      saved.entries.map((e) => ({
+        exerciseId: e.exerciseId,
+        a: String(e.weightKg ?? e.reps ?? (e.timeSec !== null ? Math.floor(e.timeSec / 60) : null) ?? e.distanceM ?? ''),
+        b: String(e.weightKg !== null ? (e.reps ?? '') : e.timeSec !== null ? e.timeSec % 60 : ''),
+      })),
+    );
+  }, [saved]);
 
   // Passende Übungen: bei Kraft die Kraftübungen, beim Laufen die Distanzen.
   const exercises = useLiveQuery(
@@ -89,9 +126,16 @@ export function SessionLogForm({
       .map((row) => toInput(row, exercises?.find((e) => e.id === row.exerciseId)))
       .filter((x): x is SetInput => x !== null);
 
+    // Beim Bearbeiten ersetzen, nicht anhängen: sonst stünde jeder Satz nach
+    // dem zweiten Speichern doppelt im Verlauf und im Volumen.
+    const log = await getSessionLog(session.id);
+    if (log) {
+      const old = await db.setEntries.where('sessionLogId').equals(log.id).toArray();
+      if (old.length > 0) await db.setEntries.bulkDelete(old.map((e) => e.id));
+    }
+
     let lines: string[] = [];
     if (inputs.length > 0) {
-      const log = await getSessionLog(session.id);
       const found = await recordSets(log?.id ?? null, session.date, inputs);
       lines = found.map(
         (r) =>
@@ -108,7 +152,9 @@ export function SessionLogForm({
 
   return (
     <div className="rounded border border-ember-dim bg-ember/5 p-3">
-      <p className="mb-2 text-[11px] uppercase tracking-widest text-ember">Kurz protokollieren</p>
+      <p className="mb-2 text-[11px] uppercase tracking-widest text-ember">
+        {saved?.log ? 'Protokoll bearbeiten' : 'Kurz protokollieren'}
+      </p>
 
       <p className="mb-1 text-xs text-ink-muted">Wie hart war es? (RPE)</p>
       <div className="mb-3 grid grid-cols-10 gap-1">

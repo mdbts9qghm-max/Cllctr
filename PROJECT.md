@@ -938,6 +938,57 @@ löscht, bekommt sie nicht wieder aufgedrängt.
 
 ---
 
+## Zwei Fehler beim Protokoll
+
+**„Protokoll bearbeiten" zeigte nie, was gespeichert war.** Das Formular setzte seine
+Felder aus der *geplanten* Einheit (`targetRpe`, `plannedDurationMin`) und lud den
+vorhandenen `SessionLog` nicht. Beim erneuten Öffnen standen wieder die Planwerte da —
+es sah aus, als wäre nichts gespeichert worden. Wer dann speicherte, überschrieb seine
+eigenen Zahlen mit den Vorgaben. Geschrieben hatte `logSession()` die ganze Zeit
+korrekt; nur gelesen wurde nie.
+
+Jetzt lädt das Formular Log und Satzeinträge und füllt RPE, Dauer, Distanz, Gefühl,
+Notiz und Sätze vor. Übernommen wird genau einmal, sonst würde der nächste Lauf des
+LiveQuery die gerade getippte Änderung zurücksetzen. Die Überschrift heißt beim
+Bearbeiten auch so.
+
+**Zweimal speichern verdoppelte die Sätze.** `recordSets()` legt immer neue Einträge an.
+Beim Bearbeiten wurden die alten deshalb nicht ersetzt, sondern ergänzt — und Volumen
+wie Bestwerte zählten denselben Satz mehrfach. Vor dem Schreiben werden die Einträge des
+Logs jetzt gelöscht.
+
+Durchgespielt: RPE 9, 55 Min, ein Satz mit 100, Notiz gespeichert → Formular neu geöffnet
+zeigt genau das → nochmal gespeichert → weiterhin ein Log und ein Satzeintrag.
+
+---
+
+## Erledigte Einheit doppelt am selben Tag
+
+Nach *Plan neu erzeugen* stand dieselbe Einheit zweimal auf dem Heute-Screen: einmal
+erledigt auf Stufe 0, einmal geplant auf Stufe 1.
+
+`clearActivePlanInternal()` behält protokollierte Einheiten — sie sind Verlauf, kein
+Plan. Der neue Generator wusste davon aber nichts und belegte denselben Tag noch einmal.
+Der Kommentar behauptete außerdem, die Einheiten würden „aus dem Plan gelöst"; tatsächlich
+zeigten sie weiter auf einen Mikrozyklus, den es nicht mehr gab.
+
+Drei Änderungen:
+
+- `createAndSavePlan()` sammelt die erledigten Einheiten ab dem Startdatum ein und gibt
+  sie als `PlanInput.completed` weiter.
+- `placeCandidates()` nimmt diese Tage als **frozen** auf. Sie bekommen nichts Neues,
+  zählen für die Nachbarregeln aber mit — wer gestern Intervalle gelaufen ist, bekommt
+  heute keine, nur weil der Plan ersetzt wurde. Der Mechanismus dafür war schon da: so
+  wird auch der Vortag am Zyklusrand berücksichtigt.
+- Zurückbehaltene Einheiten werden wirklich gelöst (`microcycleId: ''`). Damit die
+  Planliste sie trotzdem zeigt, gruppiert sie jetzt nach **Datum** statt nach Zyklus-Id —
+  sonst stünde an dem Tag „Ruhetag", obwohl dort trainiert wurde.
+
+Durchgespielt: zwei Einheiten protokolliert, Plan neu erzeugt → beide Tage tragen genau
+ihre erledigte Einheit, die neuen Einheiten liegen dahinter, kein Doppel.
+
+---
+
 ## Entwicklung
 
 ```

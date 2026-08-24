@@ -65,7 +65,16 @@ export async function createAndSavePlan(input: PlanInput): Promise<GeneratedPlan
     async () => {
       // Erst den Stand aus dem alten Plan einsammeln, dann löschen.
       const progressionBase = input.progressionBase ?? (await advanceProgressionBase());
-      plan = generateTrainingPlan({ ...input, progressionBase });
+
+      // Protokollierte Einheiten überleben das Löschen. Der neue Plan muss sie
+      // kennen, sonst legt er auf denselben Tag noch eine zweite.
+      const completed =
+        input.completed ??
+        (await db.sessions.toArray())
+          .filter((s) => s.status === 'done' && s.date >= input.startDate)
+          .map((s) => ({ date: s.date, type: s.type }));
+
+      plan = generateTrainingPlan({ ...input, progressionBase, completed });
 
       await clearActivePlanInternal();
       await db.macrocycles.put(plan.macrocycle);
@@ -105,6 +114,15 @@ async function clearActivePlanInternal(): Promise<void> {
     .map((s) => s.id);
 
   await db.sessions.bulkDelete(toDelete);
+
+  // Was bleibt, wird tatsächlich gelöst: sonst zeigte die Einheit weiter auf
+  // einen Mikrozyklus, den es nicht mehr gibt.
+  const ts = now();
+  const detached = sessions
+    .filter((s) => microIds.has(s.microcycleId) && loggedSessionIds.has(s.id))
+    .map((s) => ({ ...s, microcycleId: '', updatedAt: ts }));
+  if (detached.length > 0) await db.sessions.bulkPut(detached);
+
   await db.microcycles.bulkDelete(micros.map((m) => m.id));
   await db.mesocycles.bulkDelete(mesos.map((m) => m.id));
   await db.macrocycles.bulkDelete(macros.map((m) => m.id));

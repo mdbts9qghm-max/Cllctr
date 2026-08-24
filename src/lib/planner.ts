@@ -327,12 +327,23 @@ export function placeCandidates(
   allowDoubleDay: boolean,
   /** Vortag mit dem, was dort liegt — nur als Kontext für die Nachbarregeln. */
   previousDay?: { day: ResolvedShiftDay; assigned: SessionTypeKey[] },
+  /**
+   * Tage, an denen schon trainiert wurde. Sie bekommen nichts Neues, zählen
+   * für die Nachbarregeln aber mit — wer gestern Intervalle gelaufen ist, soll
+   * heute keine bekommen, nur weil der alte Plan ersetzt wurde.
+   */
+  occupied?: Map<IsoDate, SessionTypeKey[]>,
 ): PlacementResult {
   const slots: DaySlot[] = [
     ...(previousDay
       ? [{ day: previousDay.day, assigned: previousDay.assigned, frozen: true }]
       : []),
-    ...days.map((day) => ({ day, assigned: [] as SessionTypeKey[], frozen: false })),
+    ...days.map((day) => {
+      const done = occupied?.get(day.date);
+      return done
+        ? { day, assigned: [...done], frozen: true }
+        : { day, assigned: [] as SessionTypeKey[], frozen: false };
+    }),
   ];
   const unplaced: SessionTypeKey[] = [];
   const assignments: Assignment[] = [];
@@ -445,6 +456,14 @@ export interface PlanInput {
    * der erste Plan fängt also tatsächlich bei null an.
    */
   progressionBase?: ProgressionLevels;
+  /**
+   * Was an welchem Tag schon erledigt ist.
+   *
+   * Beim Neuerzeugen bleiben protokollierte Einheiten stehen — sie sind
+   * Verlauf. Ohne diese Liste legte der neue Plan auf denselben Tag noch eine
+   * zweite Einheit, und der Heute-Screen zeigte beide.
+   */
+  completed?: Array<{ date: IsoDate; type: SessionTypeKey }>;
 }
 
 /**
@@ -487,6 +506,12 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
   const sessions: Session[] = [];
   const unplaced: GeneratedPlan['unplaced'] = [];
   const doubleDays: IsoDate[] = [];
+
+  // Tage, an denen schon etwas protokolliert ist, sind vergeben.
+  const occupied = new Map<IsoDate, SessionTypeKey[]>();
+  for (const done of input.completed ?? []) {
+    occupied.set(done.date, [...(occupied.get(done.date) ?? []), done.type]);
+  }
 
   let state = initialPlanState(input.progressionBase ?? {});
   // Der erste Zyklus beginnt heute und ist deshalb oft angebrochen.
@@ -551,7 +576,10 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
       const previousDate = addDays(cursor, -1);
       const previousDay = {
         day: resolveShiftRange(previousDate, previousDate, ctx)[0],
-        assigned: sessions.filter((s) => s.date === previousDate).map((s) => s.type),
+        assigned: [
+          ...sessions.filter((s) => s.date === previousDate).map((s) => s.type),
+          ...(occupied.get(previousDate) ?? []),
+        ],
       };
       const built = buildCandidates(
         state,
@@ -569,6 +597,7 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
         built.candidates,
         settings.allowDoubleDayPerCycle && !isDeload,
         previousDay,
+        occupied,
       );
       for (const type of placement.unplaced) {
         unplaced.push({ cycleStart: cursor, type });

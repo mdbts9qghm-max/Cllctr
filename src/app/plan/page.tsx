@@ -143,13 +143,6 @@ export default function PlanPage() {
     );
   }
 
-  const sessionsByMicro = new Map<string, Session[]>();
-  for (const s of plan.sessions) {
-    const list = sessionsByMicro.get(s.microcycleId) ?? [];
-    list.push(s);
-    sessionsByMicro.set(s.microcycleId, list);
-  }
-
   const todayIso = today();
   const activeMicroIndex = plan.micros.findIndex(
     (m) => m.startDate <= todayIso && m.endDate >= todayIso,
@@ -276,9 +269,12 @@ export default function PlanPage() {
       >
         <div className="space-y-5">
           {plan.micros.map((micro, i) => {
-            // An einem Doppeltag steht die Laufeinheit oben: mit frischen Beinen
-            // läuft es sich besser.
-            const list = (sessionsByMicro.get(micro.id) ?? []).sort(
+            // Nach Datum statt nach Zyklus-Id: protokollierte Einheiten aus einem
+            // ersetzten Plan hängen an keinem Zyklus mehr, gehören aber sichtbar
+            // auf ihren Tag — sonst stünde dort "Ruhetag", obwohl trainiert wurde.
+            const list = plan.sessions
+              .filter((s) => s.date >= micro.startDate && s.date <= micro.endDate)
+              .sort(
               (a, b) =>
                 a.date.localeCompare(b.date) ||
                 (a.discipline === 'run' ? 0 : 1) - (b.discipline === 'run' ? 0 : 1),
