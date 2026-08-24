@@ -345,6 +345,27 @@ export async function cancelSessionsInRange(
   return affected.length;
 }
 
+/**
+ * Löscht eine Einheit samt Protokoll und Satzeinträgen.
+ *
+ * Für versehentlich Protokolliertes und für Reste aus einem ersetzten Plan.
+ * Bewusst nur über einen ausdrücklichen Knopf: eine protokollierte Einheit ist
+ * Verlauf, und Verlauf verschwindet nicht nebenbei.
+ */
+export async function deleteSession(sessionId: string): Promise<void> {
+  await db.transaction('rw', [db.sessions, db.sessionLogs, db.setEntries], async () => {
+    const logs = await db.sessionLogs.where('sessionId').equals(sessionId).toArray();
+    for (const log of logs) {
+      const entries = await db.setEntries.where('sessionLogId').equals(log.id).toArray();
+      if (entries.length > 0) await db.setEntries.bulkDelete(entries.map((e) => e.id));
+    }
+    if (logs.length > 0) await db.sessionLogs.bulkDelete(logs.map((l) => l.id));
+    await db.sessions.delete(sessionId);
+  });
+
+  await relevelPlannedProgression();
+}
+
 /** Markiert als verpasst, ohne umzuplanen — für den Fall, dass der Vorschlag verworfen wird. */
 export async function markSessionMissed(sessionId: string): Promise<void> {
   await db.sessions.update(sessionId, { status: 'missed', updatedAt: now() });

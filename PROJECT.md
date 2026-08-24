@@ -989,6 +989,30 @@ ihre erledigte Einheit, die neuen Einheiten liegen dahinter, kein Doppel.
 
 ---
 
+## Erledigt sah aus wie geplant
+
+In der Planliste war einer erledigten Einheit nichts anzusehen: gleiche Farbe, rechts
+die geplante Dauer. Standen zwei gleiche Einheiten an einem Tag — etwa das Doppel aus
+dem Fehler oben, beide protokolliert —, ließen sie sich nicht auseinanderhalten und der
+Plan wirkte kaputt, obwohl er es nicht war.
+
+Jetzt steht rechts **erledigt** statt der Minuten, in der Bestätigungsfarbe, und der
+Titel ist zurückgenommen. Nur der Status wird gezeigt, keine zweite Zeile — die Liste
+soll überfliegbar bleiben.
+
+### Einheit löschen
+
+Für Reste aus einem ersetzten Plan und für versehentlich Protokolliertes gab es keinen
+Weg zurück: *Verpasst* lässt die Einheit stehen, und eine protokollierte Einheit
+überlebt jedes Neuerzeugen — zu Recht, sie ist Verlauf.
+
+Im Detail einer **erledigten** Einheit steht deshalb jetzt *Einheit löschen*, mit
+Rückfrage. `deleteSession()` räumt Einheit, Protokoll und Satzeinträge zusammen ab und
+nummeriert die Stufen danach neu durch. Nur für erledigte Einheiten: eine geplante zu
+löschen würde den Plan stillschweigend verkleinern, dafür gibt es *Verpasst*.
+
+---
+
 ## Entwicklung
 
 ```

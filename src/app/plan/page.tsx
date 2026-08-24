@@ -11,6 +11,7 @@ import {
   buildRescheduleProposal,
   cancelSession,
   clearActivePlan,
+  deleteSession,
   createAndSavePlan,
   markSessionMissed,
   resetSessionStatus,
@@ -36,6 +37,7 @@ export default function PlanPage() {
   // Detail der Einheit.
   const [openRestDay, setOpenRestDay] = useState<string | null>(null);
   const [shiftEditFor, setShiftEditFor] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [loggingId, setLoggingId] = useState<string | null>(null);
   const [newRecords, setNewRecords] = useState<string[]>([]);
   const [newSouls, setNewSouls] = useState<Soul[]>([]);
@@ -400,16 +402,31 @@ export default function PlanPage() {
                           {/* Kein "Doppeltag"-Etikett: die zweite Zeile sagt mit
                               "↳ dazu" ohnehin, was los ist, und das Wort drückt
                               den Titel zusammen. */}
-                          <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-ink">
+                          <span
+                            className={`flex min-w-0 flex-1 items-center gap-1.5 text-sm ${
+                              session.status === 'done' ? 'text-ink-muted' : 'text-ink'
+                            }`}
+                          >
                             <span className="min-w-0 truncate">{session.title}</span>
                             {session.isKey ? <Mark variant="solid" className="text-ember" /> : null}
                           </span>
+                          {/* Eine erledigte Einheit sah aus wie eine geplante —
+                              zwei gleiche Zeilen an einem Tag ließen sich dann
+                              nicht auseinanderhalten. */}
                           <span
                             className={`shrink-0 text-[11px] tabular ${
-                              conflict ? 'text-ember' : 'text-ink-faint'
+                              conflict
+                                ? 'text-ember'
+                                : session.status === 'done'
+                                  ? 'text-ok'
+                                  : 'text-ink-faint'
                             }`}
                           >
-                            {conflict ? 'passt nicht' : `${session.plannedDurationMin} Min`}
+                            {conflict
+                              ? 'passt nicht'
+                              : session.status === 'done'
+                                ? 'erledigt'
+                                : `${session.plannedDurationMin} Min`}
                           </span>
                         </button>
 
@@ -541,6 +558,38 @@ export default function PlanPage() {
                                     {session.locked ? 'Fixierung lösen' : 'Fixieren'}
                                   </Button>
                                 </div>
+
+                                {session.status === 'done' ? (
+                                  <div className="mt-3 border-t border-line pt-3">
+                                    {confirmDeleteId === session.id ? (
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span className="text-xs text-ink">
+                                          Einheit und Protokoll werden gelöscht.
+                                        </span>
+                                        <Button
+                                          variant="danger"
+                                          onClick={async () => {
+                                            await deleteSession(session.id);
+                                            setConfirmDeleteId(null);
+                                            setOpenId(null);
+                                          }}
+                                        >
+                                          Endgültig löschen
+                                        </Button>
+                                        <Button onClick={() => setConfirmDeleteId(null)}>
+                                          Abbrechen
+                                        </Button>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        onClick={() => setConfirmDeleteId(session.id)}
+                                        className="text-xs text-ink-faint underline underline-offset-2 hover:text-danger"
+                                      >
+                                        Einheit löschen
+                                      </button>
+                                    )}
+                                  </div>
+                                ) : null}
                               </>
                             )}
 
