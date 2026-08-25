@@ -1066,6 +1066,63 @@ doppelt zählen.
 
 ---
 
+## Fünfzehn Seelen mehr
+
+Der Katalog hatte 14 Einträge — genug, um das Prinzip zu zeigen, zu wenig, um über
+Monate zu tragen. Zwischen *Fundament* (500 Min) und *Ausdauer* (2000 Min) lagen Wochen
+ohne einen einzigen greifbaren nächsten Schritt.
+
+Jetzt sind es **29**, in drei Gruppen. Die beiden Grundsätze bleiben: nichts wird
+verschenkt, nichts bestraft. Jede neue Seele hängt an einer nachprüfbaren Bedingung aus
+den echten Daten.
+
+### Was der Tag hergab (gewöhnlich)
+
+| Seele | Bedingung |
+|---|---|
+| Trotzdem | Eine Einheit protokolliert, die sich **schlecht** angefühlt hat |
+| Im Zaum gehalten | Ein lockerer Lauf mit RPE ≤ 4 |
+| Eine Stufe höher | Dieselbe Einheitsart zum zweiten Mal absolviert |
+| Fünfundzwanzig | 25 protokollierte Einheiten |
+
+*Trotzdem* ist die wichtigste davon: sie belohnt ausdrücklich den schlechten Tag, den
+man zu Ende gebracht hat. *Im Zaum gehalten* zielt auf den häufigsten Fehler im
+Ausdauersport — den lockeren Lauf zu schnell zu laufen.
+
+### Handwerk (selten)
+
+Die lange Runde (90 Min am Stück), Jede Schicht bespielt, Fünfte Stufe, Hundert
+Kilometer, Hundert Einheiten, Fünftausend Minuten, Sechs am Stück.
+
+**Jede Schicht bespielt** ist die einzige, die es so nur in dieser App gibt: mindestens
+eine Einheit an *jeder* Schichtart, die überhaupt etwas trägt — bei dieser Rotation
+Nachtschicht, Schlaftag und V-Schicht. Freischicht und Urlaub zählen nicht mit
+(`startTime === null`), sonst wäre es geschenkt. Abwesenheiten ebenso wenig.
+
+### Das lange Spiel (legendär)
+
+Zwölfte Stufe, Auf breiter Front (jede steigernde Art auf mindestens Stufe 5),
+Fünfhundert Kilometer, Ganzjährig (in zwölf verschiedenen Monaten trainiert).
+
+*Ganzjährig* ist die Seele zum eigentlichen Ziel — kein Sommerform-Sport, sondern das
+ganze Jahr.
+
+### Stufen zählen, aber nur verdiente
+
+`earnedLevels()` zählt für die Stufen-Seelen ausschließlich erledigte Einheiten mit
+`countsForProgression` — die manuelle Korrektur aus den Einstellungen bleibt außen vor.
+Eine Stufe, die man sich selbst eingetragen hat, ist keine verdiente Seele.
+
+Fast alle neuen Seelen haben eine `progress`-Funktion; damit füllt sich auch *In
+Reichweite* auf dem Heute-Screen, statt wie bisher fast nur Minuten-Schwellen zu zeigen.
+
+Durchgespielt mit einem synthetischen Datenstand (5× Intervalle, ein schlechtes Gefühl,
+ein Lauf über 95 Min): acht Seelen verdient, in Reichweite *Jede Schicht bespielt* 2/3,
+*Hundert Kilometer* 62/100, *Zwölfte Stufe* 5/12. Leerer Datenstand: null verdient,
+kein Absturz. Keine doppelten Schlüssel.
+
+---
+
 ## Entwicklung
 
 ```

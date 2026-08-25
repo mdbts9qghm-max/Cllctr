@@ -15,14 +15,17 @@
  */
 
 import { daysBetween } from './dates';
+import { PROGRESSING_TYPES, progresses } from './progression';
 import { resolveShiftDay, type ShiftContext } from './shifts';
 import {
+  SESSION_TYPES,
   type IsoDate,
   type Mesocycle,
   type Microcycle,
   type PersonalRecord,
   type Session,
   type SessionLog,
+  type SessionTypeKey,
   type SoulRarity,
   type SoulSourceKind,
 } from './types';
@@ -64,6 +67,33 @@ function completedLogs(ctx: SoulContext): Array<{ session: Session; log: Session
     .map((log) => ({ session: byId.get(log.sessionId), log }))
     .filter((x): x is { session: Session; log: SessionLog } => x.session !== undefined)
     .sort((a, b) => a.log.date.localeCompare(b.log.date));
+}
+
+function totalDistanceKm(ctx: SoulContext): number {
+  return completedLogs(ctx).reduce((sum, x) => sum + (x.log.distanceKm ?? 0), 0);
+}
+
+/**
+ * Erreichte Stufe je Einheitsart — allein aus erledigten Einheiten.
+ *
+ * Bewusst ohne die manuelle Korrektur aus den Einstellungen: eine Stufe, die
+ * man sich selbst eingetragen hat, ist keine verdiente Seele.
+ */
+function earnedLevels(ctx: SoulContext): Partial<Record<SessionTypeKey, number>> {
+  const out: Partial<Record<SessionTypeKey, number>> = {};
+  for (const session of ctx.sessions) {
+    if (session.status !== 'done' || !progresses(session.type)) continue;
+    if (session.countsForProgression === false) continue;
+    out[session.type] = (out[session.type] ?? 0) + 1;
+  }
+  return out;
+}
+
+/** Schichtarten, an denen überhaupt trainiert werden kann — echte Schichten. */
+function trainableShifts(ctx: SoulContext) {
+  return ctx.shiftContext.shiftTypes.filter(
+    (t) => t.capacity !== 'none' && !t.cancelsPlanned && t.startTime !== null,
+  );
 }
 
 function totalMinutes(ctx: SoulContext): number {
@@ -191,6 +221,104 @@ function streakSoul(
     progress: (ctx) => {
       const streak = currentStreak(ctx);
       return streak >= target ? null : { current: streak, target, unit: 'Zyklen' };
+    },
+  };
+}
+
+/** Seele auf eine Anzahl protokollierter Einheiten. */
+function countSoul(
+  key: string,
+  name: string,
+  description: string,
+  rarity: SoulRarity,
+  target: number,
+): SoulDefinition {
+  return {
+    key,
+    name,
+    description,
+    rarity,
+    sourceKind: 'volume',
+    earned: (ctx) => {
+      const logs = completedLogs(ctx);
+      return logs.length >= target
+        ? [{ sourceId: null, detail: `${target} Einheiten protokolliert`, date: logs[target - 1].log.date }]
+        : [];
+    },
+    progress: (ctx) => {
+      const current = completedLogs(ctx).length;
+      return current >= target ? null : { current, target, unit: 'Einheiten' };
+    },
+  };
+}
+
+/** Seele auf gelaufene Kilometer. */
+function distanceSoul(
+  key: string,
+  name: string,
+  description: string,
+  rarity: SoulRarity,
+  target: number,
+): SoulDefinition {
+  return {
+    key,
+    name,
+    description,
+    rarity,
+    sourceKind: 'volume',
+    earned: (ctx) => {
+      let running = 0;
+      for (const { log } of completedLogs(ctx)) {
+        running += log.distanceKm ?? 0;
+        if (running >= target) {
+          return [{ sourceId: null, detail: `${target} km gelaufen`, date: log.date }];
+        }
+      }
+      return [];
+    },
+    progress: (ctx) => {
+      const current = Math.round(totalDistanceKm(ctx));
+      return current >= target ? null : { current, target, unit: 'km' };
+    },
+  };
+}
+
+/** Seele darauf, eine Einheitsart bis auf eine Stufe hochgearbeitet zu haben. */
+function levelSoul(
+  key: string,
+  name: string,
+  description: string,
+  rarity: SoulRarity,
+  target: number,
+): SoulDefinition {
+  return {
+    key,
+    name,
+    description,
+    rarity,
+    sourceKind: 'streak',
+    earned: (ctx) => {
+      const levels = earnedLevels(ctx);
+      const reached = PROGRESSING_TYPES.filter((t) => (levels[t] ?? 0) >= target);
+      if (reached.length === 0) return [];
+
+      // Datum der Einheit, mit der die Stufe erreicht wurde.
+      const type = reached[0];
+      const own = completedLogs(ctx)
+        .filter((x) => x.session.type === type && x.session.countsForProgression !== false)
+        .map((x) => x.log.date);
+      return [
+        {
+          sourceId: null,
+          detail: `${SESSION_TYPES[type].label} auf Stufe ${target}`,
+          date: own[target - 1] ?? own[own.length - 1] ?? ctx.today,
+        },
+      ];
+    },
+    progress: (ctx) => {
+      const levels = earnedLevels(ctx);
+      const best = Math.max(0, ...PROGRESSING_TYPES.map((t) => levels[t] ?? 0));
+      return best >= target ? null : { current: best, target, unit: 'Stufen' };
     },
   };
 }
@@ -413,6 +541,243 @@ export const SOUL_CATALOG: SoulDefinition[] = [
     'legendary',
     10000,
   ),
+
+  /* ---------------------------------------------------------------- */
+  /* Was der Tag hergab                                                */
+  /* ---------------------------------------------------------------- */
+
+  {
+    key: 'bad_but_done',
+    name: 'Trotzdem',
+    description:
+      'Eine Einheit, die sich schlecht angefühlt hat — und die du zu Ende gebracht hast. Die zählt mehr als drei gute.',
+    rarity: 'common',
+    sourceKind: 'manual',
+    earned: (ctx) => {
+      const hit = completedLogs(ctx).find((x) => x.log.feeling === 'bad');
+      return hit ? [{ sourceId: null, detail: hit.session.title, date: hit.log.date }] : [];
+    },
+  },
+
+  {
+    key: 'easy_stayed_easy',
+    name: 'Im Zaum gehalten',
+    description:
+      'Einen lockeren Lauf wirklich locker gelaufen — RPE 4 oder darunter. Der häufigste Fehler im Ausdauersport, hier vermieden.',
+    rarity: 'common',
+    sourceKind: 'manual',
+    earned: (ctx) => {
+      const hit = completedLogs(ctx).find(
+        (x) =>
+          (x.session.type === 'run_easy' ||
+            x.session.type === 'run_long' ||
+            x.session.type === 'run_recovery') &&
+          x.log.rpe !== null &&
+          x.log.rpe <= 4,
+      );
+      return hit
+        ? [{ sourceId: null, detail: `${hit.session.title} bei RPE ${hit.log.rpe}`, date: hit.log.date }]
+        : [];
+    },
+  },
+
+  {
+    key: 'first_level',
+    name: 'Eine Stufe höher',
+    description:
+      'Zum ersten Mal dieselbe Einheitsart ein zweites Mal absolviert — ab hier steigert sich der Plan.',
+    rarity: 'common',
+    sourceKind: 'streak',
+    earned: (ctx) => {
+      const levels = earnedLevels(ctx);
+      const type = PROGRESSING_TYPES.find((t) => (levels[t] ?? 0) >= 2);
+      if (!type) return [];
+      const own = completedLogs(ctx).filter((x) => x.session.type === type);
+      return [
+        {
+          sourceId: null,
+          detail: `${SESSION_TYPES[type].label} auf Stufe 2`,
+          date: own[1]?.log.date ?? ctx.today,
+        },
+      ];
+    },
+  },
+
+  countSoul(
+    'sessions_25',
+    'Fünfundzwanzig',
+    '25 protokollierte Einheiten. Genug, dass es kein Zufall mehr ist.',
+    'common',
+    25,
+  ),
+
+  /* ---------------------------------------------------------------- */
+  /* Handwerk                                                          */
+  /* ---------------------------------------------------------------- */
+
+  {
+    key: 'long_run_90',
+    name: 'Die lange Runde',
+    description:
+      'Neunzig Minuten am Stück gelaufen. Ab hier geht es nicht mehr um Beine, sondern um Kopf.',
+    rarity: 'rare',
+    sourceKind: 'manual',
+    earned: (ctx) => {
+      const hit = completedLogs(ctx).find(
+        (x) => x.session.discipline === 'run' && (x.log.durationMin ?? 0) >= 90,
+      );
+      return hit
+        ? [{ sourceId: null, detail: `${hit.log.durationMin} Min am Stück`, date: hit.log.date }]
+        : [];
+    },
+    progress: (ctx) => {
+      const best = Math.max(
+        0,
+        ...completedLogs(ctx)
+          .filter((x) => x.session.discipline === 'run')
+          .map((x) => x.log.durationMin ?? 0),
+      );
+      return best >= 90 ? null : { current: best, target: 90, unit: 'Min' };
+    },
+  },
+
+  {
+    key: 'all_shifts',
+    name: 'Jede Schicht bespielt',
+    description:
+      'An jeder Schichtart trainiert, die überhaupt etwas trägt. Der Beweis, dass die Rotation dich nicht steuert.',
+    rarity: 'rare',
+    sourceKind: 'manual',
+    earned: (ctx) => {
+      const shifts = trainableShifts(ctx);
+      if (shifts.length === 0) return [];
+
+      const seen = new Map<string, IsoDate>();
+      for (const { log } of completedLogs(ctx)) {
+        const day = resolveShiftDay(log.date, ctx.shiftContext);
+        if (!seen.has(day.shiftType.id)) seen.set(day.shiftType.id, log.date);
+      }
+
+      const dates = shifts.map((t) => seen.get(t.id));
+      if (dates.some((d) => d === undefined)) return [];
+      const last = (dates as IsoDate[]).sort().slice(-1)[0];
+      return [{ sourceId: null, detail: shifts.map((t) => t.name).join(', '), date: last }];
+    },
+    progress: (ctx) => {
+      const shifts = trainableShifts(ctx);
+      if (shifts.length === 0) return null;
+      const seen = new Set(
+        completedLogs(ctx).map((x) => resolveShiftDay(x.log.date, ctx.shiftContext).shiftType.id),
+      );
+      const current = shifts.filter((t) => seen.has(t.id)).length;
+      return current >= shifts.length
+        ? null
+        : { current, target: shifts.length, unit: 'Schichtarten' };
+    },
+  },
+
+  levelSoul(
+    'level_5',
+    'Fünfte Stufe',
+    'Eine Einheitsart fünfmal absolviert und damit fünf Stufen hochgearbeitet. Steigerung, die du dir verdient hast.',
+    'rare',
+    5,
+  ),
+
+  distanceSoul(
+    'distance_100',
+    'Hundert Kilometer',
+    '100 km gelaufen, Meter für Meter selbst eingetragen.',
+    'rare',
+    100,
+  ),
+
+  countSoul(
+    'sessions_100',
+    'Hundert Einheiten',
+    'Hundertmal angefangen, hundertmal fertig geworden.',
+    'rare',
+    100,
+  ),
+
+  volumeSoul(
+    'volume_5000',
+    'Fünftausend',
+    '5000 Minuten. Über 80 Stunden, verteilt auf Früh-, Spät- und Nachtschichten.',
+    'rare',
+    5000,
+  ),
+
+  streakSoul(
+    'streak_6',
+    'Sechs am Stück',
+    'Sechs Zyklen in Folge geschlossen. Einen ganzen Monat lang keine offene Einheit.',
+    'rare',
+    6,
+  ),
+
+  /* ---------------------------------------------------------------- */
+  /* Das lange Spiel                                                   */
+  /* ---------------------------------------------------------------- */
+
+  levelSoul(
+    'level_12',
+    'Zwölfte Stufe',
+    'Eine Einheitsart zwölfmal gesteigert. Aus 45 Minuten sind 111 geworden, aus 4× 400 m sind 6× 800 m.',
+    'legendary',
+    12,
+  ),
+
+  {
+    key: 'level_all_5',
+    name: 'Auf breiter Front',
+    description:
+      'Jede steigernde Einheitsart mindestens auf Stufe 5. Kein Lieblingstraining, keine Lücke.',
+    rarity: 'legendary',
+    sourceKind: 'streak',
+    earned: (ctx) => {
+      const levels = earnedLevels(ctx);
+      if (PROGRESSING_TYPES.some((t) => (levels[t] ?? 0) < 5)) return [];
+      return [{ sourceId: null, detail: 'Alle Arten auf Stufe 5', date: ctx.today }];
+    },
+    progress: (ctx) => {
+      const levels = earnedLevels(ctx);
+      const current = PROGRESSING_TYPES.filter((t) => (levels[t] ?? 0) >= 5).length;
+      return current >= PROGRESSING_TYPES.length
+        ? null
+        : { current, target: PROGRESSING_TYPES.length, unit: 'Arten' };
+    },
+  },
+
+  distanceSoul(
+    'distance_500',
+    'Fünfhundert Kilometer',
+    '500 km. Die Strecke von München nach Hamburg, in Einzelteilen.',
+    'legendary',
+    500,
+  ),
+
+  {
+    key: 'year_round',
+    name: 'Ganzjährig',
+    description:
+      'In zwölf verschiedenen Monaten trainiert. Kein Sommerform-Sport, sondern das ganze Jahr.',
+    rarity: 'legendary',
+    sourceKind: 'event',
+    earned: (ctx) => {
+      const months = new Set<string>();
+      let hit: IsoDate | null = null;
+      for (const { log } of completedLogs(ctx)) {
+        months.add(log.date.slice(0, 7));
+        if (months.size >= 12 && hit === null) hit = log.date;
+      }
+      return hit ? [{ sourceId: null, detail: '12 Monate mit Training', date: hit }] : [];
+    },
+    progress: (ctx) => {
+      const months = new Set(completedLogs(ctx).map((x) => x.log.date.slice(0, 7)));
+      return months.size >= 12 ? null : { current: months.size, target: 12, unit: 'Monate' };
+    },
+  },
 ];
 
 export const SOUL_BY_KEY = new Map(SOUL_CATALOG.map((d) => [d.key, d]));
