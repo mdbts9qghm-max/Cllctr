@@ -16,40 +16,76 @@ import {
   type ReschedulePlan,
   type RescheduleContext,
 } from './replan';
-import { progresses, sessionForm, type ProgressionLevels } from './progression';
+import {
+  PROGRESSING_TYPES,
+  progresses,
+  sessionForm,
+  type ProgressionLevels,
+} from './progression';
 import type { ShiftContext } from './shifts';
-import { SESSION_TYPES } from './types';
-import type { IsoDate, Session, SessionFeeling, SessionLog, Settings } from './types';
+import type {
+  IsoDate,
+  Session,
+  SessionFeeling,
+  SessionLog,
+  SessionTypeKey,
+  Settings,
+} from './types';
 
 /**
- * Schreibt den Stufenstand fort und gibt ihn zurück.
+ * Der aktuelle Stufenstand je Einheitsart.
  *
- * Die Stufe wird **verdient**: sie steigt nur um die Einheiten, die im
- * bisherigen Plan als erledigt markiert sind. Wer einen Zyklus verpasst,
- * verliert nichts — er startet den neuen Plan nur nicht weiter oben, als er
- * tatsächlich trainiert hat.
+ * **Gezählt, nicht fortgeschrieben.** Früher stand hier ein Zähler in den
+ * Einstellungen, der beim Neuerzeugen um die erledigten Einheiten erhöht wurde.
+ * Der konnte nur hoch: nahm man eine Einheit zurück oder löschte sie, blieb die
+ * Stufe oben stehen, weil die Zahl längst in den Einstellungen klebte.
  *
- * Deload-Zyklen zählen nicht mit: dort wird bewusst unter dem aktuellen Stand
- * trainiert, das ist kein Fortschritt.
+ * Jetzt ergibt sich die Stufe aus dem, was tatsächlich in der Datenbank steht:
+ * so viele erledigte Einheiten dieser Art, wie es gibt. Zurücknehmen zählt
+ * damit von selbst zurück. `progressionAdjust` ist der Griff daneben — eine
+ * bewusste Korrektur nach oben oder unten.
  */
-async function advanceProgressionBase(): Promise<ProgressionLevels> {
+export async function currentProgressionLevels(): Promise<ProgressionLevels> {
   const settings = await db.settings.get('singleton');
-  const base: ProgressionLevels = { ...(settings?.progressionBase ?? {}) };
+  const adjust = settings?.progressionAdjust ?? {};
 
-  const micros = await db.microcycles.toArray();
-  const loadMicroIds = new Set(micros.filter((m) => !m.isDeload).map((m) => m.id));
-
+  const counts: Record<string, number> = {};
   for (const session of await db.sessions.toArray()) {
     if (session.status !== 'done') continue;
-    if (!loadMicroIds.has(session.microcycleId)) continue;
     if (!progresses(session.type)) continue;
-    base[session.type] = (base[session.type] ?? 0) + 1;
+    // Alte Einheiten kennen die Marke noch nicht; bei ihnen entscheidet die Art.
+    if (session.countsForProgression === false) continue;
+    counts[session.type] = (counts[session.type] ?? 0) + 1;
   }
 
-  if (settings) {
-    await db.settings.update('singleton', { progressionBase: base, updatedAt: now() });
+  const levels: ProgressionLevels = {};
+  for (const type of PROGRESSING_TYPES) {
+    const value = (counts[type] ?? 0) + (adjust[type] ?? 0);
+    if (value !== 0) levels[type] = Math.max(0, value);
   }
-  return base;
+  return levels;
+}
+
+/** Setzt die Korrektur so, dass diese Art auf der gewünschten Stufe steht. */
+export async function setProgressionLevel(
+  type: SessionTypeKey,
+  level: number,
+): Promise<void> {
+  const settings = await db.settings.get('singleton');
+  if (!settings) return;
+
+  let done = 0;
+  for (const session of await db.sessions.toArray()) {
+    if (session.status !== 'done' || session.type !== type) continue;
+    if (!progresses(type) || session.countsForProgression === false) continue;
+    done++;
+  }
+
+  await db.settings.update('singleton', {
+    progressionAdjust: { ...(settings.progressionAdjust ?? {}), [type]: Math.max(0, level) - done },
+    updatedAt: now(),
+  });
+  await relevelPlannedProgression();
 }
 
 /** Erzeugt einen Plan und schreibt ihn. Ein bestehender aktiver Plan wird ersetzt. */
@@ -63,8 +99,9 @@ export async function createAndSavePlan(input: PlanInput): Promise<GeneratedPlan
     'rw',
     [db.macrocycles, db.mesocycles, db.microcycles, db.sessions, db.sessionLogs, db.settings],
     async () => {
-      // Erst den Stand aus dem alten Plan einsammeln, dann löschen.
-      const progressionBase = input.progressionBase ?? (await advanceProgressionBase());
+      // Der Stand ergibt sich aus den erledigten Einheiten — die überleben das
+      // Löschen, also muss er nicht vorher gerettet werden.
+      const progressionBase = input.progressionBase ?? (await currentProgressionLevels());
 
       // Protokollierte Einheiten überleben das Löschen. Der neue Plan muss sie
       // kennen, sonst legt er auf denselben Tag noch eine zweite.
@@ -87,11 +124,7 @@ export async function createAndSavePlan(input: PlanInput): Promise<GeneratedPlan
   return plan;
 }
 
-/** Aktueller Stufenstand, ohne ihn fortzuschreiben. */
-export async function getProgressionBase(): Promise<ProgressionLevels> {
-  const settings = await db.settings.get('singleton');
-  return settings?.progressionBase ?? {};
-}
+
 
 /**
  * Löscht den aktiven Plan samt Sessions.
@@ -139,6 +172,7 @@ export async function clearActivePlan(): Promise<void> {
 /** Markiert eine Einheit als erledigt. */
 export async function markSessionDone(sessionId: string): Promise<void> {
   await db.sessions.update(sessionId, { status: 'done', updatedAt: now() });
+  await relevelPlannedProgression();
 }
 
 export interface QuickLog {
@@ -181,6 +215,10 @@ export async function logSession(session: Session, entry: QuickLog): Promise<voi
     await db.sessionLogs.put(record);
     await db.sessions.update(session.id, { status: 'done', updatedAt: ts });
   });
+
+  // Eine erledigte Einheit erhöht den gezählten Stand — was danach geplant ist,
+  // rückt eine Stufe nach.
+  await relevelPlannedProgression();
 }
 
 /** Das Protokoll zu einer Einheit, falls es eines gibt. */
@@ -252,34 +290,26 @@ async function relevelPlannedProgression(): Promise<void> {
   const settings = await db.settings.get('singleton');
   if (!settings) return;
 
-  const base = settings.progressionBase ?? {};
+  // Der Startpunkt ist der gezählte Stand: so viele erledigte Einheiten dieser
+  // Art, wie es gibt, plus Korrektur. Erledigte behalten ihre eigene Stufe —
+  // sie ist Verlauf und beschreibt, was tatsächlich trainiert wurde.
+  const levels = await currentProgressionLevels();
   const micros = await db.microcycles.toArray();
   const microById = new Map(micros.map((m) => [m.id, m]));
 
-  const all = (await db.sessions.toArray())
-    .filter((s) => microById.has(s.microcycleId))
-    .sort(
-      (a, b) => a.date.localeCompare(b.date) || a.orderInDay - b.orderInDay,
-    );
+  const all = (await db.sessions.toArray()).sort(
+    (a, b) => a.date.localeCompare(b.date) || a.orderInDay - b.orderInDay,
+  );
 
   const ts = now();
   const updated: Session[] = [];
 
-  for (const type of Object.keys(SESSION_TYPES) as Array<Session['type']>) {
-    if (!progresses(type)) continue;
-
-    let step = base[type] ?? 0;
+  for (const type of PROGRESSING_TYPES) {
+    let step = levels[type] ?? 0;
 
     for (const session of all) {
-      if (session.type !== type) continue;
+      if (session.type !== type || session.status !== 'planned') continue;
       const isDeload = microById.get(session.microcycleId)?.isDeload ?? false;
-
-      if (session.status === 'done') {
-        // Verlauf bleibt stehen; die Stufe geht dahinter weiter.
-        step = Math.max(step, (session.progressionStep ?? step) + (isDeload ? 0 : 1));
-        continue;
-      }
-      if (session.status === 'skipped' || session.status === 'missed') continue;
 
       const form = sessionForm(type, settings.hrZones, step, isDeload);
       if (session.progressionStep !== step) {
@@ -289,10 +319,12 @@ async function relevelPlannedProgression(): Promise<void> {
           progressionNote: form.note,
           plannedDurationMin: form.durationMin,
           targetRpe: form.targetRpe,
+          countsForProgression: !isDeload,
           content: form.content,
           updatedAt: ts,
         });
       }
+      // Deload zählt nicht hoch — dort wird bewusst unter dem Stand trainiert.
       if (!isDeload) step++;
     }
   }

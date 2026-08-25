@@ -11,15 +11,17 @@ import {
   buildRescheduleProposal,
   cancelSession,
   clearActivePlan,
+  currentProgressionLevels,
   deleteSession,
+  setProgressionLevel,
   createAndSavePlan,
   markSessionMissed,
   resetSessionStatus,
   toggleSessionLock,
 } from '@/lib/plan-store';
-import { PROGRESSING_TYPES, progresses } from '@/lib/progression';
+import { levelOf, PROGRESSING_TYPES, progresses, sessionForm } from '@/lib/progression';
 import type { ReschedulePlan } from '@/lib/replan';
-import { SESSION_STATUS_LABEL, type Session, type Soul } from '@/lib/types';
+import { SESSION_STATUS_LABEL, SESSION_TYPES, type Session, type Soul } from '@/lib/types';
 import { ShiftPicker } from '@/components/ShiftPicker';
 import { Button, Card, Mark, Notice, Section } from '@/components/ui';
 import { NewRecordsNotice, SessionLogForm } from '@/components/SessionLogForm';
@@ -38,11 +40,14 @@ export default function PlanPage() {
   const [openRestDay, setOpenRestDay] = useState<string | null>(null);
   const [shiftEditFor, setShiftEditFor] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [openLevel, setOpenLevel] = useState<string | null>(null);
   const [loggingId, setLoggingId] = useState<string | null>(null);
   const [newRecords, setNewRecords] = useState<string[]>([]);
   const [newSouls, setNewSouls] = useState<Soul[]>([]);
   const [proposal, setProposal] = useState<ReschedulePlan | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  const progressionLevels = useLiveQuery(() => currentProgressionLevels(), []);
 
   const plan = useLiveQuery(async () => {
     const macro = (await db.macrocycles.toArray()).find((m) => m.active);
@@ -58,7 +63,7 @@ export default function PlanPage() {
     };
   }, []);
 
-  if (!ctx || !settings || plan === undefined) {
+  if (!ctx || !settings || plan === undefined || progressionLevels === undefined) {
     return <p className="text-sm text-ink-faint">Lade …</p>;
   }
 
@@ -155,23 +160,21 @@ export default function PlanPage() {
     ? settings.mesoLoadCycles - activeMicro.index + (activeMicro.isDeload ? cyclesPerMeso : 0)
     : 0;
 
-  // Der Stand einer Einheitsart ist das, was als Nächstes von ihr ansteht —
-  // eine Stufe, die noch nicht geplant ist, ist auch noch nicht erreicht.
+  // Der Stand wird gezählt, nicht aus dem Plan gelesen: so steht er auch da,
+  // wenn von einer Art gerade nichts geplant ist.
   const levels = PROGRESSING_TYPES.map((type) => {
-    const next = plan.sessions
-      .filter((s) => s.type === type && s.status === 'planned' && s.date >= todayIso)
-      .sort((a, b) => a.date.localeCompare(b.date))[0];
-    if (!next) return null;
+    const step = levelOf(progressionLevels ?? {}, type);
+    const form = sessionForm(type, settings.hrZones, step, false);
     const main =
-      next.content.find((b) => /Hauptteil|Dauerlauf|Kniebeuge|Bankdrücken/i.test(b.label)) ??
-      next.content[0];
+      form.content.find((bl) => /Hauptteil|Dauerlauf|Kniebeuge|Bankdrücken/i.test(bl.label)) ??
+      form.content[0];
     return {
       type,
-      label: next.title,
-      step: next.progressionStep ?? 0,
+      label: SESSION_TYPES[type].label,
+      step,
       detail: (main?.detail ?? '').replace(/\s*·\s*\d+–\d+\s*bpm/g, ''),
     };
-  }).filter((x): x is NonNullable<typeof x> => x !== null);
+  });
 
   return (
     <>
@@ -247,17 +250,49 @@ export default function PlanPage() {
       {levels.length > 0 ? (
         <Section
           title="Steigerung"
-          hint="Jede Einheitsart hat ihre eigene Stufe und zählt hoch, sobald du sie erledigst. Ein Deload lässt die Stufe stehen."
+          hint="Jede Einheitsart hat ihre eigene Stufe: so viele erledigte Einheiten dieser Art, wie es gibt. Nimmst du eine zurück, zählt sie zurück. Ein Deload lässt die Stufe stehen. Tippe eine Zeile an, um zu korrigieren."
         >
           <Card>
-            <ul className="space-y-2.5">
+            <ul className="space-y-1">
               {levels.map((l) => (
-                <li key={l.type} className="flex items-baseline justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm text-ink">{l.label}</p>
-                    <p className="truncate text-xs text-ink-faint">{l.detail}</p>
-                  </div>
-                  <span className="shrink-0 text-xs text-ink-muted tabular">Stufe {l.step}</span>
+                <li key={l.type}>
+                  <button
+                    onClick={() => setOpenLevel(openLevel === l.type ? null : l.type)}
+                    className="flex w-full items-baseline justify-between gap-3 rounded py-1.5 text-left"
+                  >
+                    <span className="min-w-0">
+                      <span className="block text-sm text-ink">{l.label}</span>
+                      <span className="block truncate text-xs text-ink-faint">{l.detail}</span>
+                    </span>
+                    <span className="shrink-0 text-xs text-ink-muted tabular">Stufe {l.step}</span>
+                  </button>
+
+                  {openLevel === l.type ? (
+                    <div className="mb-1 mt-1 rounded border border-line bg-surface-2 p-3">
+                      <p className="mb-2 text-xs leading-relaxed text-ink-faint">
+                        Die Stufe zählt deine erledigten Einheiten. Hier lässt sie sich
+                        korrigieren — nach einem Fehleintrag oder wenn du höher einsteigen
+                        willst.
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                          onClick={() => void setProgressionLevel(l.type, l.step - 1)}
+                          disabled={l.step === 0}
+                        >
+                          − 1
+                        </Button>
+                        <Button onClick={() => void setProgressionLevel(l.type, l.step + 1)}>
+                          + 1
+                        </Button>
+                        <Button
+                          onClick={() => void setProgressionLevel(l.type, 0)}
+                          disabled={l.step === 0}
+                        >
+                          Auf Stufe 0
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
                 </li>
               ))}
             </ul>

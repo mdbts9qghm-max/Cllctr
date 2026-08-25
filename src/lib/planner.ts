@@ -648,6 +648,7 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
             load: Math.round(meta.load * deloadFactor * 10) / 10,
             progressionStep: step,
             progressionNote: form.note,
+            countsForProgression: !isDeload && progresses(type),
             content: form.content,
             status: 'planned',
             originalDate: null,

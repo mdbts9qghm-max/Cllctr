@@ -12,7 +12,7 @@ export type IsoDate = string;
 export type IsoDateTime = string;
 
 /** Version des Schemas im Export. Wird bei jeder Änderung am Modell hochgezählt. */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 /* ------------------------------------------------------------------ */
 /* Schicht                                                             */
@@ -422,6 +422,15 @@ export interface Session {
   progressionStep: number;
   /** Was sich gegenüber der letzten Stufe ändert — ein Halbsatz. */
   progressionNote: string | null;
+  /**
+   * Zählt diese Einheit für die Stufe, sobald sie erledigt ist?
+   *
+   * Falsch bei Deload- und Ersatzformen: dort wird bewusst unter dem Stand
+   * trainiert, das ist kein Fortschritt. Steht auf der Einheit statt am
+   * Zyklus, damit die Stufe auch aus Einheiten zählbar bleibt, deren Zyklus
+   * längst ersetzt wurde.
+   */
+  countsForProgression: boolean;
   content: SessionBlock[];
   status: SessionStatus;
   /** Ursprungsdatum, falls die Session verschoben wurde. */
@@ -656,13 +665,15 @@ export interface Settings {
   mesoLoadCycles: number;
   mesoDeloadCycles: number;
   /**
-   * Erreichte Stufe je Einheitsart, über Pläne hinweg.
+   * Manuelle Korrektur der Stufe je Einheitsart, positiv wie negativ.
    *
-   * Ein neuer Plan setzt hier auf, statt wieder bei null anzufangen — erhöht
-   * wird aber nur um die Einheiten, die auch wirklich erledigt wurden. Leer
-   * bedeutet: alles auf Stufe 0.
+   * Die Stufe selbst wird **gezählt**, nicht gespeichert: sie ergibt sich aus
+   * den erledigten Einheiten. Nur so geht sie auch wieder herunter, wenn man
+   * eine zurücknimmt. Diese Korrektur ist der Griff daneben — für den
+   * Einstieg auf einem höheren Niveau oder zum Zurücksetzen nach einem
+   * Fehleintrag. Leer heißt: keine Korrektur.
    */
-  progressionBase: Record<string, number>;
+  progressionAdjust: Record<string, number>;
   /** Zwei harte Tage dürfen nicht direkt aufeinanderfolgen. */
   minHoursBetweenKeySessions: number;
   /** Wie viele Tage der Umplaner nach vorne suchen darf. */

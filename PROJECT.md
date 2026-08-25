@@ -1013,6 +1013,59 @@ löschen würde den Plan stillschweigend verkleinern, dafür gibt es *Verpasst*.
 
 ---
 
+## Die Stufe konnte nur hoch
+
+Der schwerere Fehler unter den bisherigen: nahm man eine Einheit zurück oder löschte
+sie, blieb die Stufe oben stehen.
+
+Grund war das Speichermodell. `Settings.progressionBase` war ein **fortgeschriebener
+Zähler**: beim Neuerzeugen des Plans wurden die erledigten Einheiten aufaddiert und die
+Summe in die Einstellungen geschrieben. Danach war die Zahl von ihrer Herkunft gelöst —
+sie ließ sich durch nichts mehr widerlegen. Ein Fehleintrag hat die Stufe für immer
+angehoben.
+
+Jetzt wird die Stufe **gezählt statt gespeichert**:
+
+```
+Stufe = Anzahl erledigter Einheiten dieser Art  +  Korrektur
+```
+
+Damit ergibt sie sich immer aus dem, was tatsächlich in der Datenbank steht.
+Zurücknehmen zählt von selbst zurück, Löschen ebenso, und nach einem Import stimmt sie
+ohne Zusatzfeld. `advanceProgressionBase()` ist ersatzlos entfallen — es gibt nichts
+mehr fortzuschreiben.
+
+Damit Deload- und Ersatzformen nicht mitzählen, trägt die Einheit selbst die Marke
+`countsForProgression`. Sie steht bewusst auf der Einheit und nicht am Zyklus: eine
+protokollierte Einheit überlebt das Neuerzeugen und hängt danach an keinem Zyklus mehr,
+muss aber weiter zählbar bleiben.
+
+`relevelPlannedProgression()` startet jetzt beim gezählten Stand und nummeriert nur noch
+die **geplanten** Einheiten durch. Erledigte behalten ihre eigene Stufe — sie ist
+Verlauf und beschreibt, was tatsächlich trainiert wurde; sie rückwirkend umzuschreiben
+würde das Protokoll verfälschen. Ausgelöst wird das nach jedem Statuswechsel,
+einschließlich Protokollieren.
+
+### Korrigieren
+
+`progressionAdjust` ist der Griff daneben — eine bewusste Korrektur, positiv wie
+negativ. Im Abschnitt **Steigerung** ist jede Zeile antippbar: **− 1**, **+ 1**,
+**Auf Stufe 0**. Damit lässt sich ein Fehleintrag geradeziehen, ohne das Protokoll zu
+löschen, und wer nicht bei null einsteigen will, stellt seine Startstufe selbst ein.
+
+Der Abschnitt zeigt jetzt außerdem **alle** steigernden Arten, auch die, von denen
+gerade nichts geplant ist — der Stand wird gezählt und ist deshalb immer bekannt.
+
+Durchgespielt: 2× Intervalle protokolliert → Stufe 2 → eine zurück auf geplant →
+Stufe 1 → die andere gelöscht → Stufe 0. Dann über die Knöpfe +1, +1, −1, *Auf Stufe 0*
+→ 1, 2, 1, 0, und der Planinhalt zieht jedes Mal mit (4× 400 m ↔ 6× 400 m).
+
+Schema auf Version 7: `Session.countsForProgression`, `Settings.progressionAdjust`
+ersetzt `progressionBase`. Der alte Zähler wird bewusst **nicht** übernommen — er würde
+doppelt zählen.
+
+---
+
 ## Entwicklung
 
 ```
