@@ -1123,6 +1123,56 @@ kein Absturz. Keine doppelten Schlüssel.
 
 ---
 
+## Neu erzeugen löschte den Verlauf
+
+`clearActivePlanInternal()` löschte **alle** Mikro-, Meso- und Makrozyklen — auch die
+längst abgeschlossenen. Protokollierte Einheiten überlebten zwar, hingen danach aber an
+keinem Zyklus mehr. Die Folge: die Serie fing bei null an, abgeschlossene Zyklen waren
+weg, und im Plan war von dem, was man geleistet hatte, nichts mehr zu sehen. Die Daten
+lagen noch in der Datenbank, aber ohne Zusammenhang — und das kommt einem Verlust
+gleich.
+
+Der Denkfehler war die Annahme, ein Plan sei ein Objekt, das man ersetzt. Er ist ein
+**Zeitraum**. Ein neuer Plan schreibt die Zukunft neu, nicht die Vergangenheit.
+
+`clearPlanFrom(stichtag)` räumt deshalb nur noch ab dem Stichtag ab:
+
+| | |
+|---|---|
+| Zyklus endete vor dem Stichtag | bleibt unverändert |
+| Zyklus reicht darüber hinweg | wird auf den Vortag gekürzt |
+| Zyklus beginnt am Stichtag oder später | entfällt |
+| Erledigte und protokollierte Einheiten | bleiben immer |
+
+Mesozyklen ohne verbleibenden Zyklus verschwinden, die übrigen enden am letzten Tag,
+der ihnen geblieben ist. Der alte Makrozyklus gibt die Aktivmarkierung ab und bleibt als
+Verlauf stehen.
+
+### Zwei Folgen für die Anzeige
+
+Der Plan-Screen hing bisher am **aktiven** Makrozyklus — nach *Plan löschen* gab es
+keinen, und die Seite zeigte „Noch kein Plan", obwohl Verlauf da war. Er lädt jetzt die
+Zyklen direkt und unterscheidet: gibt es nichts ab heute, steht oben *Kein aktueller
+Plan* mit dem Erzeugen-Knopf, darunter weiter der Verlauf.
+
+Abgeschlossene Zyklen sind standardmäßig eingeklappt (*Einen früheren Zyklus zeigen*),
+damit die Liste nicht mit jedem Monat länger scrollt.
+
+Und für erledigte Einheiten, deren Zyklus wirklich nicht mehr existiert, gibt es die
+Liste **Früher erledigt** unter dem Plan. Ohne sie wären sie unsichtbar, obwohl sie in
+der Datenbank stehen — und genau das fühlt sich an, als wäre etwas verloren gegangen.
+
+*Plan löschen* heißt jetzt auch ehrlich „Alles ab heute wird gelöscht. Erledigtes
+bleibt." Für einen echten Neuanfang gibt es weiterhin das Zurücksetzen unter Daten.
+
+Durchgespielt: einen abgeschlossenen Zyklus mit zwei erledigten Einheiten angelegt, Plan
+neu erzeugt → der alte Zyklus steht unverändert da, seine Einheiten hängen weiter an
+ihm, der alte Makrozyklus ist als *alt* markiert, der neue aktiv. Dann *Plan löschen* →
+57 geplante Einheiten weg, beide erledigten und ihre Protokolle und Seelen da, sichtbar
+unter *Früher erledigt*.
+
+---
+
 ## Entwicklung
 
 ```

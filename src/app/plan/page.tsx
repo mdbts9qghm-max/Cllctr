@@ -41,6 +41,7 @@ export default function PlanPage() {
   const [shiftEditFor, setShiftEditFor] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [openLevel, setOpenLevel] = useState<string | null>(null);
+  const [showPast, setShowPast] = useState(false);
   const [loggingId, setLoggingId] = useState<string | null>(null);
   const [newRecords, setNewRecords] = useState<string[]>([]);
   const [newSouls, setNewSouls] = useState<Soul[]>([]);
@@ -49,15 +50,13 @@ export default function PlanPage() {
 
   const progressionLevels = useLiveQuery(() => currentProgressionLevels(), []);
 
+  // Absichtlich nicht am aktiven Makrozyklus aufgehängt: nach dem Löschen des
+  // Plans gibt es keinen mehr, der Verlauf soll aber sichtbar bleiben.
   const plan = useLiveQuery(async () => {
-    const macro = (await db.macrocycles.toArray()).find((m) => m.active);
-    if (!macro) return null;
-    const mesos = await db.mesocycles.where('macrocycleId').equals(macro.id).toArray();
     const micros = await db.microcycles.toArray();
     const sessions = await db.sessions.toArray();
+    if (micros.length === 0 && sessions.length === 0) return null;
     return {
-      macro,
-      mesos: mesos.sort((a, b) => a.index - b.index),
       micros: micros.sort((a, b) => a.startDate.localeCompare(b.startDate)),
       sessions,
     };
@@ -160,6 +159,26 @@ export default function PlanPage() {
     ? settings.mesoLoadCycles - activeMicro.index + (activeMicro.isDeload ? cyclesPerMeso : 0)
     : 0;
 
+  // Abgeschlossene Zyklen bleiben beim Neuerzeugen stehen — sie sind der
+  // Verlauf. Standardmäßig ausgeblendet, damit der Plan nicht mit jedem Monat
+  // länger scrollt.
+  /** Steht überhaupt noch etwas an? Sonst gibt es nur Verlauf. */
+  const hasFuturePlan = plan.micros.some((m) => m.endDate >= todayIso);
+
+  // Erledigte Einheiten, deren Zyklus nicht mehr existiert. Ohne eigene Liste
+  // wären sie unsichtbar, obwohl sie in der Datenbank stehen — und genau das
+  // fühlt sich an, als wäre etwas verloren gegangen.
+  const orphans = plan.sessions
+    .filter(
+      (x) =>
+        x.status === 'done' &&
+        !plan.micros.some((m) => x.date >= m.startDate && x.date <= m.endDate),
+    )
+    .sort((a, b) => b.date.localeCompare(a.date));
+  const pastMicros = hasFuturePlan ? plan.micros.filter((m) => m.endDate < todayIso) : [];
+  const visibleMicros =
+    showPast || !hasFuturePlan ? plan.micros : plan.micros.filter((m) => m.endDate >= todayIso);
+
   // Der Stand wird gezählt, nicht aus dem Plan gelesen: so steht er auch da,
   // wenn von einer Art gerade nichts geplant ist.
   const levels = PROGRESSING_TYPES.map((type) => {
@@ -228,6 +247,24 @@ export default function PlanPage() {
             </div>
           </Card>
         </div>
+      ) : null}
+
+      {!hasFuturePlan ? (
+        <Section
+          title="Kein aktueller Plan"
+          hint="Was du bereits erledigt hast, steht weiter unten — es bleibt erhalten, auch ohne Plan."
+        >
+          <Card>
+            <p className="mb-4 text-sm leading-relaxed text-ink-muted">
+              Erzeugt {MESOCYCLE_COUNT} Blöcke à {settings.mesoLoadCycles} Belastungs- und{' '}
+              {settings.mesoDeloadCycles} Deload-Zyklus, beginnend heute. Die Steigerung setzt auf
+              deinen erledigten Einheiten auf.
+            </p>
+            <Button variant="primary" onClick={() => void generate()} disabled={busy}>
+              {busy ? 'Erzeuge …' : 'Plan erzeugen'}
+            </Button>
+          </Card>
+        </Section>
       ) : null}
 
       {activeMicro ? (
@@ -304,8 +341,21 @@ export default function PlanPage() {
         title="Plan"
         hint="Ein Zyklus ist ein Durchlauf deiner Rotation. Jeder Tag steht in der Liste, auch die Ruhetage. Tippe einen Tag an — dort kannst du auch die Schicht ändern."
       >
+        {pastMicros.length > 0 ? (
+          <button
+            onClick={() => setShowPast(!showPast)}
+            className="mb-4 text-xs text-ink-faint underline underline-offset-2 hover:text-ink"
+          >
+            {showPast
+              ? 'Frühere Zyklen ausblenden'
+              : pastMicros.length === 1
+                ? 'Einen früheren Zyklus zeigen'
+                : `${pastMicros.length} frühere Zyklen zeigen`}
+          </button>
+        ) : null}
+
         <div className="space-y-5">
-          {plan.micros.map((micro, i) => {
+          {visibleMicros.map((micro) => {
             // Nach Datum statt nach Zyklus-Id: protokollierte Einheiten aus einem
             // ersetzten Plan hängen an keinem Zyklus mehr, gehören aber sichtbar
             // auf ihren Tag — sonst stünde dort "Ruhetag", obwohl trainiert wurde.
@@ -323,7 +373,7 @@ export default function PlanPage() {
               <div key={micro.id}>
                 <div className="mb-2 flex items-baseline justify-between">
                   <h3 className={`text-sm font-medium ${isActive ? 'text-ember' : 'text-ink'}`}>
-                    Zyklus {i + 1}
+                    Zyklus {plan.micros.indexOf(micro) + 1}
                     {micro.isDeload ? ' · Deload' : ''}
                   </h3>
                   <span className="text-[11px] text-ink-faint tabular">
@@ -644,17 +694,45 @@ export default function PlanPage() {
             );
           })}
         </div>
+
+        {orphans.length > 0 ? (
+          <div className="mt-6">
+            <h3 className="mb-2 text-sm font-medium text-ink">Früher erledigt</h3>
+            <p className="mb-2 text-xs leading-relaxed text-ink-faint">
+              Einheiten aus einem Plan, den es nicht mehr gibt. Sie zählen weiter — für die
+              Stufen, die Statistik und die Seelen.
+            </p>
+            <div className="space-y-1.5">
+              {orphans.map((session) => (
+                <div
+                  key={session.id}
+                  className="flex w-full items-center gap-3 rounded border border-line bg-surface px-3 py-2.5"
+                >
+                  <span className="w-16 shrink-0 text-xs text-ink-faint tabular">
+                    {weekdayShort(session.date)} {session.date.slice(8)}.
+                    {session.date.slice(5, 7)}.
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm text-ink-muted">
+                    {session.title}
+                  </span>
+                  <span className="shrink-0 text-[11px] text-ok tabular">erledigt</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </Section>
 
+      {hasFuturePlan ? (
       <Section
         title="Plan neu erzeugen"
-        hint="Nach einer Änderung an Schichtarten, Rotation oder Wochenzielen. Protokollierte Einheiten bleiben erhalten — nur die noch geplanten werden ersetzt."
+        hint="Nach einer Änderung an Schichtarten, Rotation oder Wochenzielen. Ersetzt wird nur, was ab heute geplant ist — abgeschlossene Zyklen, erledigte Einheiten und deine Protokolle bleiben unangetastet."
       >
         <Card>
           {confirmRegenerate ? (
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm text-ink">
-                Alle noch geplanten Einheiten werden ersetzt.
+                Alles ab heute wird neu geplant. Erledigtes bleibt.
               </span>
               <Button variant="primary" onClick={() => void generate()} disabled={busy}>
                 {busy ? 'Erzeuge …' : 'Ja, neu erzeugen'}
@@ -670,13 +748,15 @@ export default function PlanPage() {
           <div className="mt-4 border-t border-line pt-4">
             {confirmDelete ? (
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm text-ink">Plan wirklich löschen?</span>
+                <span className="text-sm text-ink">
+                  Alles ab heute wird gelöscht. Erledigtes bleibt.
+                </span>
                 <Button
                   variant="danger"
                   onClick={async () => {
                     await clearActivePlan();
                     setConfirmDelete(false);
-                    setMessage('Plan gelöscht.');
+                    setMessage('Plan ab heute gelöscht. Der Verlauf ist geblieben.');
                   }}
                 >
                   Ja, löschen
@@ -691,6 +771,7 @@ export default function PlanPage() {
           </div>
         </Card>
       </Section>
+      ) : null}
     </>
   );
 }

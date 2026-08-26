@@ -25,6 +25,9 @@ import {
 import type { ShiftContext } from './shifts';
 import type {
   IsoDate,
+  Macrocycle,
+  Mesocycle,
+  Microcycle,
   Session,
   SessionFeeling,
   SessionLog,
@@ -113,7 +116,7 @@ export async function createAndSavePlan(input: PlanInput): Promise<GeneratedPlan
 
       plan = generateTrainingPlan({ ...input, progressionBase, completed });
 
-      await clearActivePlanInternal();
+      await clearPlanFrom(input.startDate);
       await db.macrocycles.put(plan.macrocycle);
       await db.mesocycles.bulkPut(plan.mesocycles);
       await db.microcycles.bulkPut(plan.microcycles);
@@ -127,45 +130,112 @@ export async function createAndSavePlan(input: PlanInput): Promise<GeneratedPlan
 
 
 /**
- * Löscht den aktiven Plan samt Sessions.
+ * Räumt den Plan **ab einem Stichtag** ab — alles davor bleibt stehen.
  *
- * Protokollierte Einheiten bleiben erhalten: ein SessionLog hängt zwar an einer
- * Session-Id, die Aufzeichnung selbst ist aber Verlauf und kein Plan. Sessions
- * mit Log werden deshalb nicht gelöscht, sondern nur aus dem Plan gelöst.
+ * Ein neuer Plan schreibt die Zukunft neu, nicht die Vergangenheit. Früher
+ * wurden alle Zyklen gelöscht; damit verschwand der gesamte Verlauf: erledigte
+ * Einheiten hingen an keinem Zyklus mehr, die Serie fing bei null an, und im
+ * Plan war von dem, was man geleistet hatte, nichts mehr zu sehen. Die Daten
+ * waren zwar noch da, aber ohne Zusammenhang — und das kommt einem Verlust
+ * gleich.
+ *
+ * Deshalb gilt jetzt:
+ *
+ * - Zyklen, die vor dem Stichtag zu Ende waren, bleiben unverändert.
+ * - Ein Zyklus, der über den Stichtag reicht, wird auf den Vortag gekürzt.
+ * - Alles ab dem Stichtag wird entfernt — außer erledigten und protokollierten
+ *   Einheiten, die sind Verlauf.
  */
-async function clearActivePlanInternal(): Promise<void> {
-  const macros = await db.macrocycles.toArray();
-  const mesos = await db.mesocycles.toArray();
-  const micros = await db.microcycles.toArray();
-  const microIds = new Set(micros.map((m) => m.id));
-
+async function clearPlanFrom(from: IsoDate): Promise<void> {
   const loggedSessionIds = new Set((await db.sessionLogs.toArray()).map((l) => l.sessionId));
 
+  const micros = await db.microcycles.toArray();
+  const keptMicroIds = new Set<string>();
+  const dropMicroIds: string[] = [];
+  const truncated: Microcycle[] = [];
+  const ts = now();
+
+  for (const micro of micros) {
+    if (micro.endDate < from) {
+      keptMicroIds.add(micro.id);
+      continue;
+    }
+    if (micro.startDate >= from) {
+      dropMicroIds.push(micro.id);
+      continue;
+    }
+    // Angebrochen: der vergangene Teil bleibt als Verlauf stehen.
+    truncated.push({ ...micro, endDate: addDays(from, -1), updatedAt: ts });
+    keptMicroIds.add(micro.id);
+  }
+
   const sessions = await db.sessions.toArray();
+  const keep = (s: Session) => s.status === 'done' || loggedSessionIds.has(s.id);
+
   const toDelete = sessions
-    .filter((s) => microIds.has(s.microcycleId) && !loggedSessionIds.has(s.id))
+    .filter((s) => s.date >= from && !keep(s) && (dropMicroIds.includes(s.microcycleId) || keptMicroIds.has(s.microcycleId)))
     .map((s) => s.id);
 
-  await db.sessions.bulkDelete(toDelete);
-
-  // Was bleibt, wird tatsächlich gelöst: sonst zeigte die Einheit weiter auf
-  // einen Mikrozyklus, den es nicht mehr gibt.
-  const ts = now();
+  // Erledigtes, das an einem entfallenden Zyklus hing, wird gelöst statt
+  // gelöscht — sonst zeigte es auf einen Zyklus, den es nicht mehr gibt.
+  const dropSet = new Set(dropMicroIds);
   const detached = sessions
-    .filter((s) => microIds.has(s.microcycleId) && loggedSessionIds.has(s.id))
+    .filter((s) => dropSet.has(s.microcycleId) && keep(s))
     .map((s) => ({ ...s, microcycleId: '', updatedAt: ts }));
-  if (detached.length > 0) await db.sessions.bulkPut(detached);
 
-  await db.microcycles.bulkDelete(micros.map((m) => m.id));
-  await db.mesocycles.bulkDelete(mesos.map((m) => m.id));
-  await db.macrocycles.bulkDelete(macros.map((m) => m.id));
+  if (toDelete.length > 0) await db.sessions.bulkDelete(toDelete);
+  if (detached.length > 0) await db.sessions.bulkPut(detached);
+  if (truncated.length > 0) await db.microcycles.bulkPut(truncated);
+  if (dropMicroIds.length > 0) await db.microcycles.bulkDelete(dropMicroIds);
+
+  // Mesozyklen und Makrozyklen ohne verbleibenden Zyklus verschwinden; die
+  // übrigen enden am letzten Tag, der ihnen geblieben ist, und geben die
+  // Aktivmarkierung ab.
+  const remaining = await db.microcycles.toArray();
+  const mesos = await db.mesocycles.toArray();
+  const mesoDrop: string[] = [];
+  const mesoKeep: Mesocycle[] = [];
+
+  for (const meso of mesos) {
+    const own = remaining.filter((m) => m.mesocycleId === meso.id);
+    if (own.length === 0) {
+      mesoDrop.push(meso.id);
+      continue;
+    }
+    const last = own.map((m) => m.endDate).sort().slice(-1)[0];
+    mesoKeep.push({ ...meso, endDate: last, status: 'done', updatedAt: ts });
+  }
+  if (mesoKeep.length > 0) await db.mesocycles.bulkPut(mesoKeep);
+  if (mesoDrop.length > 0) await db.mesocycles.bulkDelete(mesoDrop);
+
+  const macros = await db.macrocycles.toArray();
+  const macroDrop: string[] = [];
+  const macroKeep: Macrocycle[] = [];
+
+  for (const macro of macros) {
+    const own = mesoKeep.filter((m) => m.macrocycleId === macro.id);
+    if (own.length === 0) {
+      macroDrop.push(macro.id);
+      continue;
+    }
+    const last = own.map((m) => m.endDate).sort().slice(-1)[0];
+    macroKeep.push({ ...macro, endDate: last, active: false, updatedAt: ts });
+  }
+  if (macroKeep.length > 0) await db.macrocycles.bulkPut(macroKeep);
+  if (macroDrop.length > 0) await db.macrocycles.bulkDelete(macroDrop);
 }
 
+/**
+ * Löscht den Plan ab heute. Der Verlauf bleibt.
+ *
+ * Für einen echten Neuanfang gibt es unter Daten das Zurücksetzen — hier geht
+ * es nur darum, den Plan loszuwerden, nicht das Geleistete.
+ */
 export async function clearActivePlan(): Promise<void> {
   await db.transaction(
     'rw',
     [db.macrocycles, db.mesocycles, db.microcycles, db.sessions, db.sessionLogs],
-    clearActivePlanInternal,
+    () => clearPlanFrom(today()),
   );
 }
 
