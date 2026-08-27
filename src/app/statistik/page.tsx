@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
@@ -14,7 +15,7 @@ import {
   weeklyVolume,
 } from '@/lib/stats';
 import { currentRecords, formatRecordValue, PR_KIND_LABEL } from '@/lib/pr';
-import { findDuplicateSessions, removeDuplicateSessions } from '@/lib/plan-store';
+import { findDuplicateSessions } from '@/lib/plan-store';
 import {
   RpeTrendChart,
   StatTile,
@@ -102,36 +103,15 @@ export default function StatistikPage() {
           <Notice tone="warn">
             <span className="mb-1 block font-medium text-ink">
               {data.duplicates.length === 1
-                ? 'Eine Einheit steht doppelt in den Daten.'
-                : `${data.duplicates.length} Einheiten stehen doppelt in den Daten.`}
+                ? 'Ein Eintrag steht doppelt im Logbuch.'
+                : `${data.duplicates.length} Einträge stehen doppelt im Logbuch.`}
             </span>
             <span className="block text-xs leading-relaxed">
-              Gleicher Tag, gleiche Art, zweimal erledigt — das kann der Plan nicht erzeugen.
-              Solche Einträge zählen hier doppelt. Reste aus einem behobenen Fehler.
-            </span>
-            {data.duplicates.slice(0, 4).map((d) => (
-              <span key={d.keep.id} className="mt-1 block text-xs">
-                · {formatShort(d.keep.date)} {d.keep.title} (×{d.drop.length + 1})
-              </span>
-            ))}
-            <span className="mt-3 block">
-              <Button
-                variant="primary"
-                disabled={busy}
-                onClick={async () => {
-                  setBusy(true);
-                  try {
-                    const removed = await removeDuplicateSessions();
-                    setMessage(
-                      `${removed} ${removed === 1 ? 'doppelter Eintrag' : 'doppelte Einträge'} entfernt. Die Zahlen stimmen jetzt.`,
-                    );
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
-              >
-                {busy ? 'Räume auf …' : 'Doppelte entfernen'}
-              </Button>
+              Sie zählen hier doppelt.{' '}
+              <Link href="/logbuch" className="text-ember underline">
+                Im Logbuch bereinigen
+              </Link>
+              .
             </span>
           </Notice>
         </div>
@@ -209,6 +189,12 @@ export default function StatistikPage() {
                 </span>
               </div>
             ))}
+            <Link
+              href="/logbuch"
+              className="block pt-1 text-xs text-ember underline underline-offset-2"
+            >
+              Im Logbuch bearbeiten
+            </Link>
           </div>
         ) : null}
       </Section>

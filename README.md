@@ -46,7 +46,7 @@ offline. Dieselbe Anleitung steht in der App unter *Einstellungen*.
 
 ```
 src/
-  app/            Screens: Heute, Plan, Aufgaben, Statistik, Seelen, Schicht, Setup, Daten
+  app/            Screens: Heute, Plan, Aufgaben, Logbuch, Statistik, Seelen, Schicht, Setup, Daten
   components/     Rahmen, Bausteine, Diagramme
   lib/
     types.ts      Datenmodell — die einzige Wahrheit über die Struktur

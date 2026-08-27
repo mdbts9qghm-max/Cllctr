@@ -1329,6 +1329,55 @@ beide Tage, die aufgeklappte Liste zeigt jeden Eintrag zweimal → *Doppelte ent
 
 ---
 
+## Das Logbuch
+
+Der Verlauf war über die App verstreut: erledigte Einheiten standen im Plan zwischen den
+geplanten, Reste aus ersetzten Plänen unter *Früher erledigt*, korrigieren ließ sich
+etwas nur dort, wo man es zufällig fand. Dabei ist genau dieser Verlauf die Grundlage
+von allem — Statistik, Stufen und Seelen rechnen daraus.
+
+Also bekommt er einen eigenen Ort: **Logbuch**, als sechster Tab.
+
+### Was drinsteht
+
+Alle Einheiten mit Status *erledigt*, nach Monat gruppiert, neueste zuerst — unabhängig
+davon, ob der Plan, aus dem sie stammen, noch existiert. Oben drei Zahlen (Einheiten,
+Minuten, Kilometer) und ein Filter für Laufen/Kraft.
+
+Ein Eintrag klappt auf und zeigt, was protokolliert wurde: RPE, Distanz, Gefühl, Notiz,
+Stufe und den Ablauf der Einheit. Darunter drei Wege:
+
+| | |
+|---|---|
+| **Bearbeiten** | öffnet das Protokollformular mit den gespeicherten Werten |
+| **Zurück auf geplant** | der Eintrag zählt nicht mehr mit, die Einheit bleibt |
+| **Eintrag löschen** | Einheit, Protokoll und Satzeinträge, mit Rückfrage |
+
+Alle drei ziehen die Stufen automatisch nach (`relevelPlannedProgression`), weil sie über
+`plan-store` laufen. Was hier geändert wird, ändert sich überall — das steht auch so im
+Hinweis über der Liste.
+
+### Was dadurch woanders verschwindet
+
+- Die Duplikat-Erkennung samt Aufräumknopf sitzt jetzt hier; die Statistik zeigt nur noch
+  einen Hinweis mit Verweis. Doppelte Einträge sind ein Problem des Verlaufs, nicht der
+  Auswertung.
+- Die Liste *Früher erledigt* auf dem Plan-Screen ist auf einen Satz mit Link
+  geschrumpft. Der Plan zeigt den Plan; der Verlauf hat jetzt sein eigenes Zuhause.
+- Unter den Statistik-Kacheln steht bei der aufgeklappten Liste *Im Logbuch bearbeiten*.
+
+### Sechs Tabs
+
+Vorher fünf. Die Beschriftungen sind mit `truncate` abgesichert und die Icons bleiben
+gleich groß; auf 390 px trägt die Leiste sechs Einträge, ohne dass etwas umbricht —
+geprüft im Browser bei iPhone-Breite.
+
+Durchgespielt: drei Einheiten protokolliert → Logbuch zeigt 3 / 125 Min → einen Eintrag
+auf 77 Min bearbeitet → Summe 177 → Filter *Kraft* zeigt 1 / 60 Min → einen Eintrag
+gelöscht → Einheit **und** Protokoll weg (3/3 → 2/2). Alle neun Screens laden fehlerfrei.
+
+---
+
 ## Entwicklung
 
 ```

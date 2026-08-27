@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
@@ -695,30 +696,15 @@ export default function PlanPage() {
         </div>
 
         {orphans.length > 0 ? (
-          <div className="mt-6">
-            <h3 className="mb-2 text-sm font-medium text-ink">Früher erledigt</h3>
-            <p className="mb-2 text-xs leading-relaxed text-ink-faint">
-              Einheiten aus einem Plan, den es nicht mehr gibt. Sie zählen weiter — für die
-              Stufen, die Statistik und die Seelen.
-            </p>
-            <div className="space-y-1.5">
-              {orphans.map((session) => (
-                <div
-                  key={session.id}
-                  className="flex w-full items-center gap-3 rounded border border-line bg-surface px-3 py-2.5"
-                >
-                  <span className="w-16 shrink-0 text-xs text-ink-faint tabular">
-                    {weekdayShort(session.date)} {session.date.slice(8)}.
-                    {session.date.slice(5, 7)}.
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-sm text-ink-muted">
-                    {session.title}
-                  </span>
-                  <span className="shrink-0 text-[11px] text-ok tabular">erledigt</span>
-                </div>
-              ))}
-            </div>
-          </div>
+          <p className="mt-5 text-xs leading-relaxed text-ink-faint">
+            {orphans.length === 1
+              ? 'Eine erledigte Einheit gehört zu keinem Zyklus mehr — sie steht im '
+              : `${orphans.length} erledigte Einheiten gehören zu keinem Zyklus mehr — sie stehen im `}
+            <Link href="/logbuch" className="text-ember underline">
+              Logbuch
+            </Link>
+            .
+          </p>
         ) : null}
       </Section>
 
