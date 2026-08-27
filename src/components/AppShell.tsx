@@ -3,6 +3,12 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '@/lib/db';
+import { today } from '@/lib/dates';
+import { useSettings, useShiftContext } from '@/lib/hooks';
+import { planFingerprint } from '@/lib/planner';
+import { syncPlan } from '@/lib/plan-store';
 import { seedIfEmpty } from '@/lib/seed';
 import { syncSouls } from '@/lib/soul-store';
 
@@ -85,6 +91,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = normalizePath(usePathname());
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [planNotice, setPlanNotice] = useState<string | null>(null);
+
+  const ctx = useShiftContext();
+  const settings = useSettings();
+
+  /**
+   * Der Fingerabdruck der Planungsgrundlage, rein lesend.
+   *
+   * Bewusst getrennt vom Anpassen: ein Schreibzugriff in einem laufenden
+   * LiveQuery lässt die Seite abstürzen. Hier wird nur beobachtet, gehandelt
+   * wird im Effekt darunter.
+   */
+  const fingerprint = useLiveQuery(async () => {
+    if (!ctx || !settings) return undefined;
+    const macro = (await db.macrocycles.toArray()).find((m) => m.active);
+    if (!macro || macro.endDate === null) return null;
+    return planFingerprint(ctx, settings, today(), macro.endDate);
+  }, [ctx, settings]);
 
   useEffect(() => {
     seedIfEmpty()
@@ -94,6 +118,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       .then(() => syncSouls())
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
+
+  /**
+   * Hat sich an Schichten, Rotation oder Zielen etwas geändert, zieht der Plan
+   * nach. Läuft nur, wenn der Fingerabdruck sich tatsächlich bewegt hat — sonst
+   * würde jede Navigation den Plan neu bauen.
+   */
+  useEffect(() => {
+    if (!ready || !ctx || !settings || !fingerprint) return;
+    let cancelled = false;
+    syncPlan(ctx, settings)
+      .then((result) => {
+        if (cancelled || !result) return;
+        setPlanNotice(
+          result.changed === 0
+            ? 'Plan an deine Schichten angepasst — es blieb alles, wie es war.'
+            : `Plan angepasst: an ${result.changed} ${
+                result.changed === 1 ? 'Tag' : 'Tagen'
+              } liegt jetzt etwas anderes.`,
+        );
+        void syncSouls();
+      })
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, fingerprint, ctx, settings]);
 
   useEffect(() => {
     // Offline-Fähigkeit: ohne die Hülle im Cache nützen die lokalen Daten nichts.
@@ -133,7 +183,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             Die lokale Datenbank konnte nicht geöffnet werden: {error}
           </p>
         ) : ready ? (
-          children
+          <>
+            {planNotice ? (
+              <div className="mb-6 rounded-lg border border-ember-dim bg-ember/10 px-4 py-3">
+                <div className="flex items-start gap-3">
+                  <p className="flex-1 text-sm leading-relaxed text-ink">{planNotice}</p>
+                  <button
+                    onClick={() => setPlanNotice(null)}
+                    aria-label="Hinweis schließen"
+                    className="-mr-1 -mt-1 px-2 py-1 text-ink-faint hover:text-ink"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {children}
+          </>
         ) : (
           <p className="text-sm text-ink-faint">Lade lokale Daten …</p>
         )}

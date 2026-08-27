@@ -319,6 +319,28 @@ export default function SetupPage() {
             </span>
           </label>
 
+          <label className="mt-4 flex items-start gap-3 border-t border-line pt-4">
+            <input
+              type="checkbox"
+              checked={settings.autoUpdatePlan !== false}
+              onChange={(e) =>
+                void db.settings.update('singleton', {
+                  autoUpdatePlan: e.target.checked,
+                  updatedAt: now(),
+                })
+              }
+              className="mt-1 size-4 accent-[#e0a43c]"
+            />
+            <span className="text-sm leading-relaxed text-ink">
+              Plan bei Änderungen selbst anpassen
+              <span className="mt-0.5 block text-xs text-ink-faint">
+                Nach einem Schichttausch oder geänderten Zielen plant die App ab heute neu.
+                Erledigtes und Fixiertes bleibt unangetastet. Aus: die App wartet auf
+                „Plan neu erzeugen".
+              </span>
+            </span>
+          </label>
+
           <div className="mt-4 grid grid-cols-2 gap-3">
             <Field label="Belastungs-Zyklen" hint="Zyklen bis zum Deload.">
               <input

@@ -444,6 +444,61 @@ export interface GeneratedPlan {
   progressionBase: ProgressionLevels;
 }
 
+/**
+ * Fingerabdruck aller Eingaben, aus denen ein Plan entsteht.
+ *
+ * Ändert sich davon etwas — eine Schicht, die Rotation, ein Wochenziel —, dann
+ * beschreibt der bestehende Plan eine Woche, die es nicht mehr gibt. Statt das
+ * dem Nutzer aufzubürden ("denk dran, neu zu erzeugen"), vergleicht die App
+ * beide Fingerabdrücke und passt den Plan selbst an.
+ *
+ * Bewusst nur die **Eingaben**, nicht das Ergebnis: Was man abhakt, verschiebt
+ * oder streicht, ist keine Änderung der Grundlage und löst nichts aus.
+ */
+export function planFingerprint(
+  ctx: ShiftContext,
+  settings: Settings,
+  from: IsoDate,
+  to: IsoDate,
+): string {
+  const rotation = ctx.pattern
+    ? `${ctx.pattern.anchorDate}|${ctx.pattern.sequence.join(',')}`
+    : 'keine';
+
+  // Kapazität und Abwesenheitsmarke entscheiden über die Planung; Name und
+  // Farbe nicht — eine Umbenennung soll den Plan nicht anfassen.
+  const types = [...ctx.shiftTypes]
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((t) => `${t.id}:${t.capacity}:${t.cancelsPlanned ? 'x' : '-'}`)
+    .join(',');
+
+  const overrides = ctx.overrides
+    .filter((o) => o.date >= from && o.date <= to)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((o) => `${o.date}:${o.shiftTypeId}`)
+    .join(',');
+
+  // Die Zonen stehen im Text jeder Einheit ("Zone 2 · 139–160 bpm". Ändert man
+  // sie, stimmt der Plan nicht mehr mit den Einstellungen überein.
+  const zones = settings.hrZones
+    .map((z) => `${z.zone}:${z.minBpm}-${z.maxBpm}`)
+    .join(',');
+
+  const targets = settings.weeklyTargets;
+  const rules = [
+    targets.strength,
+    targets.run,
+    targets.optional,
+    settings.planningProfile,
+    settings.allowStrengthOnLightDays ? 'k+' : 'k-',
+    settings.allowDoubleDayPerCycle ? 'd+' : 'd-',
+    settings.mesoLoadCycles,
+    settings.mesoDeloadCycles,
+  ].join('|');
+
+  return `1;${rotation};${types};${overrides};${rules};${zones}`;
+}
+
 export interface PlanInput {
   startDate: IsoDate;
   ctx: ShiftContext;
@@ -497,6 +552,7 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
     targetEventName: null,
     targetEventDate: null,
     active: true,
+    inputFingerprint: '',
     createdAt: ts,
     updatedAt: ts,
   };
@@ -675,6 +731,7 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
   }
 
   macrocycle.endDate = addDays(cursor, -1);
+  macrocycle.inputFingerprint = planFingerprint(ctx, settings, startDate, macrocycle.endDate);
 
   return {
     macrocycle,

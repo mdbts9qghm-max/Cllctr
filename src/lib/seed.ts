@@ -209,6 +209,7 @@ export function defaultSettings(): Settings {
     mesoDeloadCycles: 1,
     // Leer: keine Korrektur, der erste Plan fängt bei null an.
     progressionAdjust: {},
+    autoUpdatePlan: true,
     minHoursBetweenKeySessions: 24,
     rescheduleWindowDays: 7,
     confirmRescheduleProposals: true,
@@ -247,6 +248,9 @@ export async function seedIfEmpty(): Promise<void> {
       // Nachgereicht für Installationen von vor der progressiven Steigerung:
       // ohne den Stufenstand fiele jeder neue Plan auf Stufe 0 zurück.
       const existing = await db.settings.get('singleton');
+      if (existing && existing.autoUpdatePlan === undefined) {
+        await db.settings.update('singleton', { autoUpdatePlan: true, updatedAt: now() });
+      }
       if (existing && !existing.progressionAdjust) {
         // Der frühere `progressionBase` war ein aufsummierter Zähler und wird
         // bewusst nicht übernommen: die Stufe wird jetzt aus den erledigten

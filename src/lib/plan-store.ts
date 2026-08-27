@@ -9,7 +9,12 @@
 import { db } from './db';
 import { addDays, today } from './dates';
 import { newId, now } from './ids';
-import { generateTrainingPlan, type GeneratedPlan, type PlanInput } from './planner';
+import {
+  generateTrainingPlan,
+  planFingerprint,
+  type GeneratedPlan,
+  type PlanInput,
+} from './planner';
 import {
   applyRescheduleToSessions,
   proposeReschedule,
@@ -111,7 +116,11 @@ export async function createAndSavePlan(input: PlanInput): Promise<GeneratedPlan
       const completed =
         input.completed ??
         (await db.sessions.toArray())
-          .filter((s) => s.status === 'done' && s.date >= input.startDate)
+          .filter(
+            (s) =>
+              s.date >= input.startDate &&
+              (s.status === 'done' || (s.locked && s.status === 'planned')),
+          )
           .map((s) => ({ date: s.date, type: s.type }));
 
       plan = generateTrainingPlan({ ...input, progressionBase, completed });
@@ -128,6 +137,81 @@ export async function createAndSavePlan(input: PlanInput): Promise<GeneratedPlan
 }
 
 
+
+/**
+ * Wie viele Blöcke im Voraus geplant werden. Muss zum Plan-Screen passen —
+ * eine Anpassung soll den Planungshorizont nicht heimlich verändern.
+ */
+export const MESOCYCLE_COUNT = 3;
+
+/**
+ * Passt den Plan an, wenn sich die Grundlage geändert hat.
+ *
+ * Der Nutzer soll nicht daran denken müssen, nach jedem Schichttausch "Plan neu
+ * erzeugen" zu drücken. Verglichen wird der Fingerabdruck der Eingaben —
+ * Rotation, Schichtarten, Abweichungen, Wochenziele. Weicht er ab, wird ab
+ * heute neu geplant.
+ *
+ * Was dabei nicht angerührt wird: erledigte und protokollierte Einheiten, und
+ * alles, was **fixiert** ist. Wer eine bestimmte Einheit an ihrem Tag halten
+ * will, fixiert sie — dann überlebt sie jede Anpassung.
+ *
+ * Gibt zurück, was passiert ist, oder null, wenn nichts zu tun war.
+ */
+export async function syncPlan(
+  ctx: ShiftContext,
+  settings: Settings,
+): Promise<{ changed: number; sessions: number } | null> {
+  if (settings.autoUpdatePlan === false) return null;
+
+  const macro = (await db.macrocycles.toArray()).find((m) => m.active);
+  if (!macro) return null;
+
+  const from = today();
+  // Ein Plan, der ganz in der Vergangenheit liegt, wird nicht mehr angefasst.
+  const until = macro.endDate;
+  if (until === null || until < from) return null;
+
+  const current = planFingerprint(ctx, settings, from, until);
+  if (macro.inputFingerprint === '') {
+    // Plan von vor der Automatik: Fingerabdruck nachtragen, aber nicht neu
+    // planen — sonst würde ein Update den Plan ungefragt umbauen.
+    await db.macrocycles.update(macro.id, { inputFingerprint: current, updatedAt: now() });
+    return null;
+  }
+  if (macro.inputFingerprint === current) return null;
+
+  // Gezählt wird in **Tagen**, nicht in Einheiten: "an drei Tagen liegt jetzt
+  // etwas anderes" sagt mehr als eine Zahl, die durch Verschiebungen in beide
+  // Richtungen ohnehin nur die halbe Wahrheit trifft.
+  const dayMap = (list: Session[]) => {
+    const out = new Map<IsoDate, string>();
+    for (const s of list) {
+      if (s.status !== 'planned' || s.date < from) continue;
+      out.set(s.date, [...(out.get(s.date)?.split(',') ?? []), s.type].sort().join(','));
+    }
+    return out;
+  };
+
+  const before = dayMap(await db.sessions.toArray());
+
+  const plan = await createAndSavePlan({
+    startDate: from,
+    ctx,
+    settings,
+    mesocycleCount: MESOCYCLE_COUNT,
+    name: macro.name,
+  });
+
+  const after = dayMap(plan.sessions);
+  const dates = new Set([...before.keys(), ...after.keys()]);
+  let changed = 0;
+  for (const date of dates) {
+    if (before.get(date) !== after.get(date)) changed++;
+  }
+
+  return { changed, sessions: plan.sessions.length };
+}
 
 /**
  * Räumt den Plan **ab einem Stichtag** ab — alles davor bleibt stehen.
@@ -170,7 +254,10 @@ async function clearPlanFrom(from: IsoDate): Promise<void> {
   }
 
   const sessions = await db.sessions.toArray();
-  const keep = (s: Session) => s.status === 'done' || loggedSessionIds.has(s.id);
+  // Fixiert heißt: Finger weg. Das ist der Griff, mit dem man eine einzelne
+  // Einheit gegen jede Neuplanung schützt.
+  const keep = (s: Session) =>
+    s.status === 'done' || s.locked || loggedSessionIds.has(s.id);
 
   const toDelete = sessions
     .filter((s) => s.date >= from && !keep(s) && (dropMicroIds.includes(s.microcycleId) || keptMicroIds.has(s.microcycleId)))

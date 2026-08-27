@@ -13,6 +13,7 @@ import {
   clearActivePlan,
   currentProgressionLevels,
   deleteSession,
+  MESOCYCLE_COUNT,
   setProgressionLevel,
   createAndSavePlan,
   markSessionMissed,
@@ -25,8 +26,6 @@ import { SESSION_STATUS_LABEL, SESSION_TYPES, type Session, type Soul } from '@/
 import { ShiftPicker } from '@/components/ShiftPicker';
 import { Button, Card, Mark, Notice, Section } from '@/components/ui';
 import { NewRecordsNotice, SessionLogForm } from '@/components/SessionLogForm';
-
-const MESOCYCLE_COUNT = 3;
 
 export default function PlanPage() {
   const ctx = useShiftContext();
@@ -726,7 +725,7 @@ export default function PlanPage() {
       {hasFuturePlan ? (
       <Section
         title="Plan neu erzeugen"
-        hint="Nach einer Änderung an Schichtarten, Rotation oder Wochenzielen. Ersetzt wird nur, was ab heute geplant ist — abgeschlossene Zyklen, erledigte Einheiten und deine Protokolle bleiben unangetastet."
+        hint="Normalerweise nicht nötig — der Plan passt sich bei Änderungen von selbst an. Hier nur, wenn du bewusst neu würfeln willst. Ersetzt wird nur, was ab heute geplant ist; abgeschlossene Zyklen, Erledigtes und Fixiertes bleiben unangetastet."
       >
         <Card>
           {confirmRegenerate ? (

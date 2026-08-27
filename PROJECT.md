@@ -1173,6 +1173,65 @@ unter *Früher erledigt*.
 
 ---
 
+## Der Plan passt sich selbst an
+
+Bis hierher musste man nach jedem Schichttausch daran denken, *Plan neu erzeugen* zu
+drücken. Genau das ist die Art Arbeit, die die App abnehmen soll — und wer es vergisst,
+läuft mit einem Plan herum, der eine Woche beschreibt, die es nicht mehr gibt. Die
+Konfliktmarkierung („passt nicht mehr") war eine Krücke dafür.
+
+### Woran die App merkt, dass sich etwas geändert hat
+
+`planFingerprint()` fasst alle Eingaben zusammen, aus denen ein Plan entsteht: Rotation
+(Folge und Startdatum), Kapazität und Abwesenheitsmarke jeder Schichtart, alle
+Abweichungen im Planungszeitraum, Wochenziele, Profil, Zyklus-Längen und die
+Herzfrequenzzonen. Der Wert steht auf dem Makrozyklus (`inputFingerprint`).
+
+Bewusst nur die **Eingaben**, nicht das Ergebnis: Was man abhakt, verschiebt oder
+streicht, ist keine Änderung der Grundlage und löst nichts aus. Name und Farbe einer
+Schichtart auch nicht — eine Umbenennung soll den Plan nicht anfassen.
+
+### Was dabei geschützt ist
+
+`syncPlan()` plant ab **heute** neu. Unangetastet bleiben:
+
+- erledigte und protokollierte Einheiten (wie bisher),
+- abgeschlossene Zyklen (seit `clearPlanFrom`),
+- alles, was **fixiert** ist.
+
+Damit bekommt *Fixieren* endlich seinen eigentlichen Zweck: es ist der Griff, mit dem
+man eine einzelne Einheit an ihrem Tag festnagelt. Fixierte Tage gehen als belegt in die
+Neuplanung ein, genau wie erledigte.
+
+### Wo es ausgelöst wird
+
+In `AppShell`, also einmal für die ganze App statt auf jedem Screen einzeln. Ein
+LiveQuery beobachtet **rein lesend** den Fingerabdruck; gehandelt wird im Effekt
+darunter. Ein Schreibzugriff im laufenden LiveQuery würde die Seite abstürzen lassen —
+dieselbe Trennung wie bei `syncSouls()`.
+
+Danach steht oben ein Hinweis: *„Plan angepasst: an 6 Tagen liegt jetzt etwas anderes."*
+Gezählt wird in Tagen, nicht in Einheiten — eine Zahl, die durch Verschiebungen in beide
+Richtungen entsteht, trifft ohnehin nur die halbe Wahrheit.
+
+Pläne, die vor dieser Automatik erzeugt wurden, tragen keinen Fingerabdruck. Sie
+bekommen ihn beim ersten Start nachgetragen, **ohne** neu geplant zu werden — ein Update
+soll den bestehenden Plan nicht ungefragt umbauen.
+
+### Abschaltbar
+
+Unter Setup → *Plan bei Änderungen selbst anpassen*. Aus heißt: die App wartet wieder auf
+den Knopf. Der Nutzer hatte früh entschieden, dass die App vorschlägt und er bestätigt —
+diese Automatik ist eine Ausnahme davon, also gehört ihr ein Schalter.
+
+Durchgespielt: Plan erzeugt, eine Einheit protokolliert, eine spätere fixiert. Dann
+sechs Tage auf Tagschicht gesetzt → Hinweis „an 6 Tagen liegt jetzt etwas anderes", die
+erledigte Einheit unverändert, die fixierte weiter auf ihrem Tag. Beim erneuten Öffnen
+passiert nichts mehr. Automatik abgeschaltet und die Rotation verschoben → Plan bleibt
+stehen.
+
+---
+
 ## Entwicklung
 
 ```

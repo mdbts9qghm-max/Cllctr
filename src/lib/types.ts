@@ -12,7 +12,7 @@ export type IsoDate = string;
 export type IsoDateTime = string;
 
 /** Version des Schemas im Export. Wird bei jeder Änderung am Modell hochgezählt. */
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 /* ------------------------------------------------------------------ */
 /* Schicht                                                             */
@@ -317,6 +317,14 @@ export interface Macrocycle {
   targetEventName: string | null;
   targetEventDate: IsoDate | null;
   active: boolean;
+  /**
+   * Fingerabdruck der Eingaben, aus denen dieser Plan entstand.
+   *
+   * Weicht er vom aktuellen ab, beschreibt der Plan eine Woche, die es nicht
+   * mehr gibt — dann passt sich der Plan selbst an. Leer bei Plänen, die vor
+   * dieser Automatik erzeugt wurden.
+   */
+  inputFingerprint: string;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
 }
@@ -674,6 +682,13 @@ export interface Settings {
    * Fehleintrag. Leer heißt: keine Korrektur.
    */
   progressionAdjust: Record<string, number>;
+  /**
+   * Passt sich der Plan von selbst an, wenn sich Schichten oder Ziele ändern?
+   *
+   * An heißt: nach einem Schichttausch steht der Plan schon richtig da, ohne
+   * dass man ihn neu erzeugen muss. Aus heißt: die App wartet auf den Knopf.
+   */
+  autoUpdatePlan: boolean;
   /** Zwei harte Tage dürfen nicht direkt aufeinanderfolgen. */
   minHoursBetweenKeySessions: number;
   /** Wie viele Tage der Umplaner nach vorne suchen darf. */
