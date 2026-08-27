@@ -1295,6 +1295,40 @@ eingesammelt. Eine Lücke in der Mitte einer Reihe bricht die Serie korrekt.
 
 ---
 
+## „4 von 4" bei zwei Einheiten
+
+Der Nutzer meldete vier gezählte Einheiten bei zwei absolvierten. Die Auswertung rechnete
+richtig — in den Daten standen tatsächlich vier: Reste des Fehlers, bei dem *Plan neu
+erzeugen* eine zweite Einheit auf einen Tag legte, an dem schon eine protokolliert war.
+Beide wurden abgehakt, beide zählen.
+
+Der Fehler ist behoben, die Altlast blieb. Und sie war schwer zu finden: eine erledigte
+Einheit sieht aus wie jede andere, und dass eine Zahl aus vier Einträgen besteht, sieht
+man ihr nicht an.
+
+### Die Zahl aufmachen
+
+Unter den Kacheln steht jetzt **Welche Einheiten sind das?** und klappt genau die Liste
+auf, aus der „x von y" entsteht — Datum, Titel, Status. Eine Zahl, die man nicht
+nachschauen kann, glaubt man irgendwann nicht mehr.
+
+### Doppelte finden und entfernen
+
+`findDuplicateSessions()` sucht erledigte Einheiten mit **gleichem Tag und gleicher Art**.
+Das kann der Generator nicht erzeugen — ein Doppeltag ist immer Kraft *und* Laufen —,
+also ist jedes solche Paar ein Fehleintrag. Behalten wird die Einheit mit Protokoll,
+sonst die ältere.
+
+Gefundene Paare stehen als Hinweis oben auf der Statistik, mit den betroffenen Tagen und
+einem Knopf *Doppelte entfernen*. Gelöscht wird nur auf Ansage: Verlauf verschwindet
+nicht von selbst, auch fehlerhafter nicht.
+
+Nachgestellt: zwei Einheiten protokolliert, beide gedoppelt → „4 von 4", Hinweis nennt
+beide Tage, die aufgeklappte Liste zeigt jeden Eintrag zweimal → *Doppelte entfernen* →
+„2 von 2".
+
+---
+
 ## Entwicklung
 
 ```

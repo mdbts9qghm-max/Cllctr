@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
-import { formatShort } from '@/lib/dates';
+import { addDays, formatShort, today } from '@/lib/dates';
 import { useSettings } from '@/lib/hooks';
 import {
   deloadSignal,
@@ -14,6 +14,7 @@ import {
   weeklyVolume,
 } from '@/lib/stats';
 import { currentRecords, formatRecordValue, PR_KIND_LABEL } from '@/lib/pr';
+import { findDuplicateSessions, removeDuplicateSessions } from '@/lib/plan-store';
 import {
   RpeTrendChart,
   StatTile,
@@ -26,11 +27,15 @@ import { Button, Card, Notice, Section } from '@/components/ui';
 export default function StatistikPage() {
   const settings = useSettings();
   const [showTable, setShowTable] = useState(false);
+  const [showCounted, setShowCounted] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
 
   const data = useLiveQuery(async () => {
     const [sessions, logs] = await Promise.all([db.sessions.toArray(), db.sessionLogs.toArray()]);
     const records = await currentRecords();
-    return { sessions, logs, records };
+    const duplicates = await findDuplicateSessions();
+    return { sessions, logs, records, duplicates };
   }, []);
 
   if (!settings || !data) return <p className="text-sm text-ink-faint">Lade …</p>;
@@ -39,6 +44,16 @@ export default function StatistikPage() {
   const hasLogs = logged.length > 0;
 
   const kpi = headline(data.sessions, logged);
+  // Dieselbe Auswahl wie in headline() — daraus entsteht "x von y".
+  const countedSince = addDays(today(), -28);
+  const counted = data.sessions
+    .filter(
+      (x) =>
+        x.date >= countedSince &&
+        x.status !== 'skipped' &&
+        (x.date <= today() || x.status === 'done'),
+    )
+    .sort((a, b) => b.date.localeCompare(a.date));
   const volume = weeklyVolume(logged);
   const zones = runZoneDistribution(logged);
   const rpe = rpeTrend(logged);
@@ -72,6 +87,52 @@ export default function StatistikPage() {
                 · {reason}
               </span>
             ))}
+          </Notice>
+        </div>
+      ) : null}
+
+      {message ? (
+        <div className="mb-6">
+          <Notice tone="ok">{message}</Notice>
+        </div>
+      ) : null}
+
+      {data.duplicates.length > 0 ? (
+        <div className="mb-8">
+          <Notice tone="warn">
+            <span className="mb-1 block font-medium text-ink">
+              {data.duplicates.length === 1
+                ? 'Eine Einheit steht doppelt in den Daten.'
+                : `${data.duplicates.length} Einheiten stehen doppelt in den Daten.`}
+            </span>
+            <span className="block text-xs leading-relaxed">
+              Gleicher Tag, gleiche Art, zweimal erledigt — das kann der Plan nicht erzeugen.
+              Solche Einträge zählen hier doppelt. Reste aus einem behobenen Fehler.
+            </span>
+            {data.duplicates.slice(0, 4).map((d) => (
+              <span key={d.keep.id} className="mt-1 block text-xs">
+                · {formatShort(d.keep.date)} {d.keep.title} (×{d.drop.length + 1})
+              </span>
+            ))}
+            <span className="mt-3 block">
+              <Button
+                variant="primary"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    const removed = await removeDuplicateSessions();
+                    setMessage(
+                      `${removed} ${removed === 1 ? 'doppelter Eintrag' : 'doppelte Einträge'} entfernt. Die Zahlen stimmen jetzt.`,
+                    );
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                {busy ? 'Räume auf …' : 'Doppelte entfernen'}
+              </Button>
+            </span>
           </Notice>
         </div>
       ) : null}
@@ -113,6 +174,43 @@ export default function StatistikPage() {
             tone={kpi.rpeDelta !== null && kpi.rpeDelta > 1 ? 'warn' : 'default'}
           />
         </div>
+
+        {/* Eine Zahl, die man nicht nachschauen kann, glaubt man irgendwann
+            nicht mehr. Hier steht, woraus sie besteht. */}
+        <button
+          onClick={() => setShowCounted(!showCounted)}
+          className="mt-3 text-xs text-ink-faint underline underline-offset-2 hover:text-ink"
+        >
+          {showCounted ? 'Einheiten ausblenden' : 'Welche Einheiten sind das?'}
+        </button>
+
+        {showCounted ? (
+          <div className="mt-2 space-y-1">
+            {counted.length === 0 ? (
+              <p className="text-xs text-ink-faint">Keine im Zeitraum.</p>
+            ) : null}
+            {counted.map((session) => (
+              <div
+                key={session.id}
+                className="flex items-center gap-3 rounded border border-line bg-surface px-3 py-2"
+              >
+                <span className="w-16 shrink-0 text-xs text-ink-faint tabular">
+                  {formatShort(session.date)}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm text-ink-muted">
+                  {session.title}
+                </span>
+                <span
+                  className={`shrink-0 text-[11px] tabular ${
+                    session.status === 'done' ? 'text-ok' : 'text-ink-faint'
+                  }`}
+                >
+                  {session.status === 'done' ? 'erledigt' : 'offen'}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </Section>
 
       <Section

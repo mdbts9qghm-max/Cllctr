@@ -535,6 +535,56 @@ export async function cancelSessionsInRange(
 }
 
 /**
+ * Einheiten, die doppelt in den Daten stehen.
+ *
+ * Gleicher Tag, gleiche Art, beide erledigt — das kann der Generator nicht
+ * erzeugen (ein Doppeltag ist immer Kraft **und** Laufen). Solche Paare stammen
+ * aus einem früheren Fehler, bei dem das Neuerzeugen eine zweite Einheit auf
+ * einen Tag legte, an dem schon eine protokolliert war. Sie zählen in der
+ * Auswertung doppelt und ließen sich sonst nur einzeln im Plan aufspüren.
+ *
+ * Behalten wird die Einheit mit Protokoll, sonst die ältere.
+ */
+export async function findDuplicateSessions(): Promise<
+  Array<{ keep: Session; drop: Session[] }>
+> {
+  const sessions = await db.sessions.toArray();
+  const logged = new Set((await db.sessionLogs.toArray()).map((l) => l.sessionId));
+
+  const groups = new Map<string, Session[]>();
+  for (const session of sessions) {
+    if (session.status !== 'done') continue;
+    const key = `${session.date}|${session.type}`;
+    groups.set(key, [...(groups.get(key) ?? []), session]);
+  }
+
+  const out: Array<{ keep: Session; drop: Session[] }> = [];
+  for (const list of groups.values()) {
+    if (list.length < 2) continue;
+    const ranked = [...list].sort((a, b) => {
+      const byLog = Number(logged.has(b.id)) - Number(logged.has(a.id));
+      if (byLog !== 0) return byLog;
+      return a.createdAt.localeCompare(b.createdAt);
+    });
+    out.push({ keep: ranked[0], drop: ranked.slice(1) });
+  }
+  return out.sort((a, b) => a.keep.date.localeCompare(b.keep.date));
+}
+
+/** Entfernt die überzähligen Einträge und gibt zurück, wie viele es waren. */
+export async function removeDuplicateSessions(): Promise<number> {
+  const duplicates = await findDuplicateSessions();
+  let removed = 0;
+  for (const { drop } of duplicates) {
+    for (const session of drop) {
+      await deleteSession(session.id);
+      removed++;
+    }
+  }
+  return removed;
+}
+
+/**
  * Löscht eine Einheit samt Protokoll und Satzeinträgen.
  *
  * Für versehentlich Protokolliertes und für Reste aus einem ersetzten Plan.
