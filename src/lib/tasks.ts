@@ -9,7 +9,7 @@
  * Termine sind davon ausgenommen — die liegen fest und werden immer gezeigt.
  */
 
-import { addDays, fromIsoDate, toIsoDate } from './dates';
+import { addDays, fromIsoDate, today, toIsoDate } from './dates';
 import {
   SESSION_TYPES,
   type IsoDate,
@@ -215,4 +215,86 @@ export function tasksBlockedByEnergy(
       !budget.allowed.includes(t.energy) &&
       (t.dueDate === null || t.dueDate <= todayIso),
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* Routinen: Serie und Raster                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Die Familie, zu der eine wiederkehrende Aufgabe gehört.
+ *
+ * Beim Abhaken entsteht jedes Mal eine neue Instanz mit eigener Id; nur
+ * `templateTaskId` hält sie zusammen. Ohne diesen Schlüssel wäre jede Routine
+ * nach dem ersten Haken eine andere Aufgabe.
+ */
+export function routineFamily(task: Task): string {
+  return task.templateTaskId ?? task.id;
+}
+
+/** An welchen Tagen wurde diese Routine erledigt? */
+export function routineDays(tasks: Task[], family: string): Set<IsoDate> {
+  const out = new Set<IsoDate>();
+  for (const task of tasks) {
+    if (task.status !== 'done' || routineFamily(task) !== family) continue;
+    // Das Fälligkeitsdatum ist der Tag, um den es ging; der Zeitstempel sagt
+    // nur, wann man dazu kam — bei Nachtschicht gern nach Mitternacht.
+    out.add(task.dueDate ?? (task.completedAt ?? '').slice(0, 10));
+  }
+  out.delete('');
+  return out;
+}
+
+/**
+ * Wie viele Tage in Folge, bis heute zurück?
+ *
+ * Der heutige Tag zählt mit, wenn er erledigt ist — ist er es noch nicht,
+ * bricht das die Serie aber nicht: der Tag ist noch nicht vorbei.
+ */
+export function routineStreak(days: Set<IsoDate>, reference: IsoDate = today()): number {
+  let streak = 0;
+  let cursor = days.has(reference) ? reference : addDays(reference, -1);
+  while (days.has(cursor)) {
+    streak++;
+    cursor = addDays(cursor, -1);
+  }
+  return streak;
+}
+
+/** Die letzten `length` Tage als Ja/Nein, ältester zuerst. */
+export function routineGrid(
+  days: Set<IsoDate>,
+  reference: IsoDate = today(),
+  length = 7,
+): Array<{ date: IsoDate; done: boolean }> {
+  const out: Array<{ date: IsoDate; done: boolean }> = [];
+  for (let i = length - 1; i >= 0; i--) {
+    const date = addDays(reference, -i);
+    out.push({ date, done: days.has(date) });
+  }
+  return out;
+}
+
+/**
+ * Tage in Folge, an denen **jede** tägliche Routine erledigt war.
+ *
+ * Der Maßstab, der wirklich etwas aussagt: eine einzelne Routine hält man
+ * leicht durch, alle zusammen nicht.
+ */
+export function allRoutinesStreak(
+  tasks: Task[],
+  families: string[],
+  reference: IsoDate = today(),
+): number {
+  if (families.length === 0) return 0;
+  const sets = families.map((f) => routineDays(tasks, f));
+  const complete = (date: IsoDate) => sets.every((s) => s.has(date));
+
+  let streak = 0;
+  let cursor = complete(reference) ? reference : addDays(reference, -1);
+  while (complete(cursor)) {
+    streak++;
+    cursor = addDays(cursor, -1);
+  }
+  return streak;
 }

@@ -17,6 +17,7 @@
 import { daysBetween } from './dates';
 import { PROGRESSING_TYPES, progresses } from './progression';
 import { resolveShiftDay, type ShiftContext } from './shifts';
+import { isDaily, routineDays, routineFamily } from './tasks';
 import {
   SESSION_TYPES,
   type IsoDate,
@@ -25,6 +26,7 @@ import {
   type PersonalRecord,
   type Session,
   type SessionLog,
+  type Task,
   type SessionTypeKey,
   type SoulRarity,
   type SoulSourceKind,
@@ -36,6 +38,7 @@ export interface SoulContext {
   microcycles: Microcycle[];
   mesocycles: Mesocycle[];
   records: PersonalRecord[];
+  tasks: Task[];
   shiftContext: ShiftContext;
   today: IsoDate;
 }
@@ -221,6 +224,66 @@ function streakSoul(
     progress: (ctx) => {
       const streak = currentStreak(ctx);
       return streak >= target ? null : { current: streak, target, unit: 'Zyklen' };
+    },
+  };
+}
+
+/**
+ * Tage, an denen **jede** tägliche Routine erledigt war, chronologisch.
+ *
+ * Eine einzelne Routine hält man leicht durch; alle zusammen ist der Maßstab,
+ * der etwas aussagt.
+ */
+function fullRoutineDays(ctx: SoulContext): IsoDate[] {
+  const families = [
+    ...new Set(
+      ctx.tasks
+        .filter((t) => t.kind === 'chore' && isDaily(t))
+        .map(routineFamily),
+    ),
+  ];
+  if (families.length === 0) return [];
+
+  const sets = families.map((f) => routineDays(ctx.tasks, f));
+  const all = [...new Set(sets.flatMap((x) => [...x]))].sort();
+  return all.filter((date) => sets.every((set) => set.has(date)));
+}
+
+/** Seele auf eine Serie voller Routine-Tage. */
+function routineSoul(
+  key: string,
+  name: string,
+  description: string,
+  rarity: SoulRarity,
+  target: number,
+): SoulDefinition {
+  const bestRun = (days: IsoDate[]) => {
+    let run = 0;
+    let best = 0;
+    let hit: IsoDate | null = null;
+    let previous: IsoDate | null = null;
+    for (const date of days) {
+      run = previous !== null && daysBetween(previous, date) === 1 ? run + 1 : 1;
+      previous = date;
+      if (run > best) best = run;
+      if (run >= target && hit === null) hit = date;
+    }
+    return { best, hit };
+  };
+
+  return {
+    key,
+    name,
+    description,
+    rarity,
+    sourceKind: 'streak',
+    earned: (ctx) => {
+      const { hit } = bestRun(fullRoutineDays(ctx));
+      return hit ? [{ sourceId: null, detail: `${target} Tage in Folge`, date: hit }] : [];
+    },
+    progress: (ctx) => {
+      const { best } = bestRun(fullRoutineDays(ctx));
+      return best >= target ? null : { current: best, target, unit: 'Tage' };
     },
   };
 }
@@ -611,6 +674,14 @@ export const SOUL_CATALOG: SoulDefinition[] = [
     25,
   ),
 
+  routineSoul(
+    'routines_3',
+    'Drei Tage Ordnung',
+    'Drei Tage hintereinander jede tägliche Routine erledigt. Der Anfang einer Gewohnheit.',
+    'common',
+    3,
+  ),
+
   /* ---------------------------------------------------------------- */
   /* Handwerk                                                          */
   /* ---------------------------------------------------------------- */
@@ -708,6 +779,14 @@ export const SOUL_CATALOG: SoulDefinition[] = [
     5000,
   ),
 
+  routineSoul(
+    'routines_14',
+    'Zwei Wochen Ordnung',
+    'Vierzehn Tage am Stück jede Routine abgehakt — durch Nachtschichten und Schlaftage hindurch.',
+    'rare',
+    14,
+  ),
+
   streakSoul(
     'streak_6',
     'Sechs am Stück',
@@ -748,6 +827,14 @@ export const SOUL_CATALOG: SoulDefinition[] = [
         : { current, target: PROGRESSING_TYPES.length, unit: 'Arten' };
     },
   },
+
+  routineSoul(
+    'routines_60',
+    'Sechzig Tage Ordnung',
+    'Zwei Monate ohne einen einzigen ausgelassenen Tag. Das Drumherum entscheidet über das Training.',
+    'legendary',
+    60,
+  ),
 
   distanceSoul(
     'distance_500',

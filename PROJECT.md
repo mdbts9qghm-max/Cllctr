@@ -1232,6 +1232,69 @@ stehen.
 
 ---
 
+## Zwei Zählfehler in der Auswertung
+
+**Erledigtes an einem künftigen Tag zählte nicht.** `headline()` filterte
+`s.date <= reference` — „was noch bevorsteht, ist keine verpasste Chance". Richtig, aber
+zu grob: bei Schichtarbeit hakt man eine Einheit auch mal vor ihrem geplanten Tag ab.
+Die verschwand dann aus *Durchgezogen* und aus den Wochenminuten. Nachgeprüft: zwei
+erledigte Einheiten, angezeigt „1 von 1" und 40 statt 100 Minuten. Erledigtes zählt
+jetzt unabhängig vom Datum, und die laufende Woche zählt ganz statt nur bis heute.
+
+**Offene Einheiten aus der Vergangenheit blieben für immer offen.** Sie stehen zu Recht
+im Nenner — eine nie abgehakte Einheit ist nicht durchgezogen. Nur gab es keinen Ort,
+sie zu erledigen: der Heute-Screen zeigt heute, der Plan-Screen ist eine Liste. Also
+sammelten sie sich an und zogen die Quote nach unten, ohne dass man etwas tun konnte.
+
+Neu auf dem Heute-Screen: **Noch offen** — Einheiten der letzten 14 Tage, die nie
+abgehakt wurden, mit *Nachtragen* (öffnet das Protokollformular), *Verpasst* und
+*Streichen*. Damit schließt sich die Schleife.
+
+---
+
+## Der Aufgaben-Tab bekommt eine Kette
+
+„Spielerischer" darf hier nicht heißen: bunter. Die Vorgabe war von Anfang an
+Artefakt-Inventar, kein Belohnungs-Stickerheft — kein Konfetti, eine Akzentfarbe. Das
+Spiel dieser App ist der Soul Collector, also wird der Aufgaben-Tab in **dessen** Sprache
+gespielt, nicht in der einer Habit-App.
+
+### Tagesstand
+
+Über den Routinen steht groß **4 / 4** mit einem Balken je Routine — gefüllt heißt
+erledigt. Darunter ein Satz: „Alles erledigt an 4 Tagen in Folge." Eine Zahl, ein Balken,
+ein Satz.
+
+### Sieben Tage zurück
+
+Jede Routine trägt ein Raster der letzten sieben Tage. Eine Lücke sieht man sofort, und
+genau das ist der Antrieb, keine zu lassen — dieselbe Mechanik wie beim Zyklus-Streak,
+nur auf Tagesebene. Rechts daneben die eigene Serie, ab zwei Tagen in der Akzentfarbe.
+
+Die Daten dafür lagen längst da: beim Abhaken entsteht eine neue Instanz, die erledigte
+bleibt stehen und `templateTaskId` hält die Familie zusammen. `routineDays()`,
+`routineStreak()`, `routineGrid()` und `allRoutinesStreak()` in `tasks.ts` lesen sie aus.
+Gerechnet wird über das **Fälligkeitsdatum**, nicht den Zeitstempel — bei Nachtschicht
+hakt man gern nach Mitternacht ab.
+
+Der heutige Tag bricht eine Serie nicht, solange er noch läuft: er ist erst dann eine
+Lücke, wenn er vorbei ist.
+
+### Drei Seelen dafür
+
+Drei Tage Ordnung (gewöhnlich), Zwei Wochen Ordnung (selten), Sechzig Tage Ordnung
+(legendär) — jeweils *jede* tägliche Routine an so vielen Tagen in Folge. Eine einzelne
+Routine hält man leicht durch; alle zusammen ist der Maßstab, der etwas aussagt. Der
+Katalog steht damit bei **32**.
+
+`SoulContext` bekommt dafür die Aufgaben mit dazu.
+
+Durchgespielt: vier Routinen an vier Tagen in Folge erledigt → „4 / 4", „Alles erledigt
+an 4 Tagen in Folge", je Routine „4 Tage in Folge", Seele *Drei Tage Ordnung*
+eingesammelt. Eine Lücke in der Mitte einer Reihe bricht die Serie korrekt.
+
+---
+
 ## Entwicklung
 
 ```

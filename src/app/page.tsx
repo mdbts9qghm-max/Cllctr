@@ -24,8 +24,9 @@ import {
 import { completeTask } from '@/lib/task-store';
 import { getSoulsInReach } from '@/lib/soul-store';
 import type { ReschedulePlan } from '@/lib/replan';
-import { CAPACITY_LABEL, TASK_ENERGY_LABEL, type Session, type Task } from '@/lib/types';
+import { CAPACITY_LABEL, TASK_ENERGY_LABEL, type Session, type Task , type Soul } from '@/lib/types';
 import { Button, CapacityBadge, Card, Mark, Notice, Section } from '@/components/ui';
+import { NewRecordsNotice, SessionLogForm } from '@/components/SessionLogForm';
 import { SessionCard } from '@/components/SessionCard';
 
 /** Tage in der Vorschau "Als Nächstes". */
@@ -35,6 +36,9 @@ export default function HeutePage() {
   const ctx = useShiftContext();
   const settings = useSettings();
   const [proposal, setProposal] = useState<ReschedulePlan | null>(null);
+  const [catchUpId, setCatchUpId] = useState<string | null>(null);
+  const [newRecords, setNewRecords] = useState<string[]>([]);
+  const [newSouls, setNewSouls] = useState<Soul[]>([]);
   const [message, setMessage] = useState<string | null>(null);
 
   const todayIso = today();
@@ -44,11 +48,27 @@ export default function HeutePage() {
       .where('date')
       .between(addDays(todayIso, -1), addDays(todayIso, LOOKAHEAD_DAYS), true, true)
       .toArray();
+    // Einheiten aus den letzten zwei Wochen, die nie abgehakt wurden. Bei
+    // Schichtarbeit trägt man auch mal zwei Tage später nach — ohne diese
+    // Liste bleiben sie für immer offen und ziehen die Auswertung nach unten.
+    const openBefore = await db.sessions
+      .where('date')
+      .between(addDays(todayIso, -14), addDays(todayIso, -1), true, false)
+      .toArray();
     const micros = await db.microcycles.toArray();
     const hasPlan = (await db.macrocycles.count()) > 0;
     const tasks = await db.tasks.where('status').equals('open').toArray();
     const souls = await db.souls.orderBy('collectedAt').reverse().limit(3).toArray();
-    return { sessions, micros, hasPlan, tasks, souls };
+    return {
+      sessions,
+      openBefore: openBefore
+        .filter((s) => s.status === 'planned')
+        .sort((a, b) => b.date.localeCompare(a.date)),
+      micros,
+      hasPlan,
+      tasks,
+      souls,
+    };
   }, [todayIso]);
 
   // Nur lesend: Die Auswertung selbst läuft beim App-Start und nach jedem
@@ -264,6 +284,60 @@ export default function HeutePage() {
         )}
 
       </section>
+
+      {/* 1b — Was aus den letzten Tagen offen blieb */}
+      {data.openBefore.length > 0 ? (
+        <Section
+          title="Noch offen"
+          hint="Aus den letzten Tagen, nie abgehakt. Solange das so steht, zählt es in der Auswertung als nicht durchgezogen."
+        >
+          <NewRecordsNotice records={newRecords} souls={newSouls} />
+          <div className="space-y-1.5">
+            {data.openBefore.map((session) => (
+              <div key={session.id} className="rounded border border-line bg-surface">
+                <div className="flex items-center gap-3 px-3 py-2.5">
+                  <span className="w-16 shrink-0 text-xs text-ink-faint tabular">
+                    {weekdayShort(session.date)} {session.date.slice(8)}.
+                    {session.date.slice(5, 7)}.
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm text-ink">{session.title}</span>
+                  <span className="shrink-0 text-[11px] text-ink-faint tabular">
+                    {session.plannedDurationMin} Min
+                  </span>
+                </div>
+
+                {catchUpId === session.id ? (
+                  <div className="border-t border-line px-3 py-3">
+                    <SessionLogForm
+                      session={session}
+                      onSaved={(records, souls) => {
+                        setNewRecords(records);
+                        setNewSouls(souls);
+                        setCatchUpId(null);
+                      }}
+                      onCancel={() => setCatchUpId(null)}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2 border-t border-line px-3 py-2.5">
+                    <Button variant="primary" onClick={() => setCatchUpId(session.id)}>
+                      Nachtragen
+                    </Button>
+                    <Button onClick={() => void markSessionMissed(session.id)}>Verpasst</Button>
+                    <Button
+                      onClick={() =>
+                        void cancelSession(session.id, 'Nachträglich gestrichen — der Tag ist durch.')
+                      }
+                    >
+                      Streichen
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </Section>
+      ) : null}
 
       {/* 2a — Tägliche Routinen, unabhängig von der Tagesenergie */}
       {dailies.length > 0 ? (

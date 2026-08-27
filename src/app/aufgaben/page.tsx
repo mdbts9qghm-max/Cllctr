@@ -6,7 +6,16 @@ import { db } from '@/lib/db';
 import { formatShort, today } from '@/lib/dates';
 import { useShiftContext } from '@/lib/hooks';
 import { resolveShiftDay } from '@/lib/shifts';
-import { isDaily, isOverdue, taskEnergyBudget } from '@/lib/tasks';
+import {
+  allRoutinesStreak,
+  isDaily,
+  isOverdue,
+  routineDays,
+  routineFamily,
+  routineGrid,
+  routineStreak,
+  taskEnergyBudget,
+} from '@/lib/tasks';
 import { completeTask, createTask, deleteTask, reopenTask } from '@/lib/task-store';
 import {
   TASK_ENERGY_LABEL,
@@ -65,6 +74,21 @@ export default function AufgabenPage() {
   const dailies = open
     .filter((t) => t.kind === 'chore' && isDaily(t))
     .sort((a, b) => a.priority - b.priority || a.title.localeCompare(b.title));
+  // Der Tagesstand der Routinen: erledigt heißt, es gibt für heute eine
+  // abgehakte Instanz derselben Familie.
+  const dailyState = dailies.map((task) => {
+    const days = routineDays(tasks, routineFamily(task));
+    return {
+      task,
+      days,
+      doneToday: days.has(todayIso),
+      streak: routineStreak(days, todayIso),
+      grid: routineGrid(days, todayIso, 7),
+    };
+  });
+  const doneToday = dailyState.filter((d) => d.doneToday).length;
+  const allStreak = allRoutinesStreak(tasks, dailies.map(routineFamily), todayIso);
+
   const chores = open
     .filter((t) => t.kind === 'chore' && !isDaily(t))
     .sort((a, b) => {
@@ -101,7 +125,7 @@ export default function AufgabenPage() {
     resetForm();
   }
 
-  function TaskRow({ task }: { task: Task }) {
+  function TaskRow({ task, bare = false }: { task: Task; bare?: boolean }) {
     const overdue = isOverdue(task, todayIso);
     // Routinen laufen an der Energieprüfung vorbei — sie stehen auch an knappen
     // Tagen auf dem Heute-Screen. Das Etikett wäre hier ein Widerspruch.
@@ -109,7 +133,11 @@ export default function AufgabenPage() {
       task.kind === 'appointment' || isDaily(task) || budget.allowed.includes(task.energy);
 
     return (
-      <div className="flex items-start gap-3 rounded border border-line bg-surface px-3 py-2.5">
+      <div
+        className={`flex items-start gap-3 px-3 py-2.5 ${
+          bare ? '' : 'rounded border border-line bg-surface'
+        }`}
+      >
         <button
           onClick={() => void (task.status === 'open' ? completeTask(task) : reopenTask(task.id))}
           aria-label={task.status === 'open' ? 'Abhaken' : 'Wieder öffnen'}
@@ -308,12 +336,69 @@ export default function AufgabenPage() {
 
       {dailies.length > 0 ? (
         <Section
-          title={`Täglich (${dailies.length})`}
+          title="Täglich"
           hint="Routinen. Erscheinen jeden Tag auf dem Heute-Screen, unabhängig von der Tagesenergie."
         >
+          {/* Der Tagesstand als Kette: gefüllte Glieder sind erledigt. Kein
+              Konfetti, aber sichtbar, wie weit der Tag ist. */}
+          <Card className="mb-3">
+            <div className="mb-3 flex items-baseline justify-between gap-3">
+              <span className="text-2xl font-semibold text-ink tabular">
+                {doneToday}
+                <span className="text-base font-normal text-ink-faint"> / {dailies.length}</span>
+              </span>
+              <span className="text-[11px] uppercase tracking-widest text-ink-faint">
+                heute erledigt
+              </span>
+            </div>
+
+            <div className="flex gap-1">
+              {dailyState.map((d) => (
+                <span
+                  key={d.task.id}
+                  title={d.task.title}
+                  className={`h-1.5 flex-1 rounded-full ${d.doneToday ? 'bg-ember' : 'bg-line-strong'}`}
+                />
+              ))}
+            </div>
+
+            <p className="mt-3 border-t border-line pt-3 text-xs leading-relaxed text-ink-faint">
+              {allStreak === 0
+                ? 'Noch kein voller Tag in Folge. Der erste zählt ab heute.'
+                : `Alles erledigt an ${allStreak} ${allStreak === 1 ? 'Tag' : 'Tagen'} in Folge.`}
+            </p>
+          </Card>
+
           <div className="space-y-1.5">
-            {dailies.map((t) => (
-              <TaskRow key={t.id} task={t} />
+            {dailyState.map(({ task: t, streak, grid }) => (
+              <div key={t.id} className="rounded border border-line bg-surface">
+                <TaskRow task={t} bare />
+                <div className="flex items-center gap-3 border-t border-line px-3 py-2">
+                  {/* Sieben Tage zurück. Eine Lücke sieht man sofort — genau
+                      das ist der Antrieb, keine zu lassen. */}
+                  <div className="flex gap-1" aria-label="Letzte sieben Tage">
+                    {grid.map((cell) => (
+                      <span
+                        key={cell.date}
+                        title={cell.date}
+                        className={`size-2.5 rounded-sm ${
+                          cell.done
+                            ? 'bg-ember'
+                            : cell.date === todayIso
+                              ? 'border border-ember-dim'
+                              : 'bg-line-strong'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                  <span className="flex-1" />
+                  <span
+                    className={`text-[11px] tabular ${streak >= 2 ? 'text-ember' : 'text-ink-faint'}`}
+                  >
+                    {streak === 0 ? 'keine Serie' : `${streak} ${streak === 1 ? 'Tag' : 'Tage'} in Folge`}
+                  </span>
+                </div>
+              </div>
             ))}
           </div>
         </Section>

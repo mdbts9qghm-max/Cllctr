@@ -195,15 +195,25 @@ export function headline(
 ): Headline {
   const since = addDays(reference, -sinceDays);
 
-  // Nur vergangene Einheiten zählen — was noch bevorsteht, ist keine verpasste Chance.
+  /**
+   * Was noch bevorsteht, ist keine verpasste Chance — **außer** es ist schon
+   * erledigt. Bei Schichtarbeit hakt man eine Einheit auch mal vor ihrem
+   * geplanten Tag ab; sie dann nicht mitzuzählen sah aus, als wäre die Hälfte
+   * verschwunden.
+   */
   const relevant = sessions.filter(
-    (s) => s.date >= since && s.date <= reference && s.status !== 'skipped',
+    (s) =>
+      s.date >= since &&
+      s.status !== 'skipped' &&
+      (s.date <= reference || s.status === 'done'),
   );
   const done = relevant.filter((s) => s.status === 'done');
 
+  // Ebenso: die laufende Woche zählt ganz, nicht nur bis heute.
   const weekStart = startOfWeek(reference);
+  const weekEnd = addDays(weekStart, 6);
   const minutesThisWeek = logged
-    .filter((x) => x.log.completed && x.log.date >= weekStart && x.log.date <= reference)
+    .filter((x) => x.log.completed && x.log.date >= weekStart && x.log.date <= weekEnd)
     .reduce((sum, x) => sum + (x.log.durationMin ?? 0), 0);
 
   const recent = logged.filter((x) => x.log.completed && x.log.rpe !== null).slice(-10);
