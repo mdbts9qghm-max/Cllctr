@@ -162,6 +162,8 @@ export default function PlanPage() {
   // Abgeschlossene Zyklen bleiben beim Neuerzeugen stehen — sie sind der
   // Verlauf. Standardmäßig ausgeblendet, damit der Plan nicht mit jedem Monat
   // länger scrollt.
+  const doneCount = plan.sessions.filter((x) => x.status === 'done').length;
+
   /** Steht überhaupt noch etwas an? Sonst gibt es nur Verlauf. */
   const hasFuturePlan = plan.micros.some((m) => m.endDate >= todayIso);
 
@@ -283,6 +285,33 @@ export default function PlanPage() {
           </Card>
         </Section>
       ) : null}
+
+      {/* Der Plan zeigt, was ansteht; das Logbuch, was war. Der Weg dorthin
+          gehört hierher — man sucht den Verlauf dort, wo der Plan steht. */}
+      <Link
+        href="/logbuch"
+        className="mb-8 flex items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3 transition-colors hover:border-line-strong"
+      >
+        <span
+          className="flex size-8 shrink-0 items-center justify-center rounded text-ink-faint"
+          aria-hidden="true"
+        >
+          <svg viewBox="0 0 20 20" className="size-5" fill="none" strokeWidth="1.6" stroke="currentColor">
+            <path d="M4.5 3.5h9a2 2 0 0 1 2 2v11a2 2 0 0 0-2-2h-9z" />
+            <path d="M4.5 3.5a1.5 1.5 0 0 0 0 3" strokeLinecap="round" />
+            <path d="M7.5 8h5M7.5 11h3" strokeLinecap="round" />
+          </svg>
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm text-ink">Logbuch</span>
+          <span className="block text-xs text-ink-faint">
+            {doneCount === 0
+              ? 'Noch nichts erledigt — hier landet, was du abhakst.'
+              : `${doneCount} erledigte ${doneCount === 1 ? 'Einheit' : 'Einheiten'} — bearbeiten, korrigieren, löschen`}
+          </span>
+        </span>
+        <span className="text-ink-faint">›</span>
+      </Link>
 
       {levels.length > 0 ? (
         <Section

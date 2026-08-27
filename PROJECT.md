@@ -1366,11 +1366,16 @@ Hinweis über der Liste.
   geschrumpft. Der Plan zeigt den Plan; der Verlauf hat jetzt sein eigenes Zuhause.
 - Unter den Statistik-Kacheln steht bei der aufgeklappten Liste *Im Logbuch bearbeiten*.
 
-### Sechs Tabs
+### Kein eigener Tab
 
-Vorher fünf. Die Beschriftungen sind mit `truncate` abgesichert und die Icons bleiben
-gleich groß; auf 390 px trägt die Leiste sechs Einträge, ohne dass etwas umbricht —
-geprüft im Browser bei iPhone-Breite.
+Zuerst als sechster Tab gebaut, auf Wunsch wieder herausgenommen: die Leiste bleibt bei
+fünf. Das Logbuch ist nichts, was man täglich öffnet — man geht hin, wenn eine Zahl
+falsch aussieht oder ein Eintrag korrigiert gehört.
+
+Der Weg dorthin steht jetzt im **Plan**, direkt unter *Stand im Block*: eine Zeile mit
+Buchsymbol, der Anzahl erledigter Einheiten und dem, was dort möglich ist. Der Plan zeigt,
+was ansteht — der Verlauf gehört daneben, nicht in die Leiste. Zurück führt oben links
+ein *‹ Plan*, weil das Logbuch selbst nicht mehr in der Leiste hängt.
 
 Durchgespielt: drei Einheiten protokolliert → Logbuch zeigt 3 / 125 Min → einen Eintrag
 auf 77 Min bearbeitet → Summe 177 → Filter *Kraft* zeigt 1 / 60 Min → einen Eintrag

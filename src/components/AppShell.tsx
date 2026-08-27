@@ -21,22 +21,9 @@ const TABS = [
   { href: '/', label: 'Heute', icon: IconToday },
   { href: '/plan', label: 'Plan', icon: IconPlan },
   { href: '/aufgaben', label: 'Aufgaben', icon: IconTasks },
-  { href: '/logbuch', label: 'Logbuch', icon: IconLog },
   { href: '/statistik', label: 'Statistik', icon: IconStats },
   { href: '/seelen', label: 'Seelen', icon: IconSoul },
 ];
-
-function IconLog({ active }: { active: boolean }) {
-  return (
-    <svg viewBox="0 0 20 20" className="size-5" fill="none" strokeWidth="1.6" stroke="currentColor">
-      <path d="M4.5 3.5h9a2 2 0 0 1 2 2v11a2 2 0 0 0-2-2h-9z" />
-      <path d="M4.5 3.5a1.5 1.5 0 0 0 0 3" strokeLinecap="round" />
-      {active ? (
-        <path d="M7.5 8h5M7.5 11h3" strokeLinecap="round" strokeWidth="1.8" />
-      ) : null}
-    </svg>
-  );
-}
 
 function IconToday({ active }: { active: boolean }) {
   return (
@@ -230,7 +217,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 key={tab.href}
                 href={tab.href}
                 aria-current={active ? 'page' : undefined}
-                className={`flex min-w-0 flex-1 flex-col items-center gap-0.5 px-0.5 py-2.5 text-[10px] leading-tight transition-colors ${
+                className={`flex min-w-0 flex-1 flex-col items-center gap-0.5 py-2.5 text-[10px] transition-colors ${
                   active ? 'text-ember' : 'text-ink-faint hover:text-ink-muted'
                 }`}
               >

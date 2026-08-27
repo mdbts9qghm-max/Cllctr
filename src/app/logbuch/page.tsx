@@ -93,6 +93,15 @@ export default function LogbuchPage() {
 
   return (
     <>
+      {/* Das Logbuch hängt nicht in der Leiste — ohne diesen Weg zurück müsste
+          man raten, wo man herkam. */}
+      <Link
+        href="/plan"
+        className="mb-6 inline-flex items-center gap-1 text-xs text-ink-faint hover:text-ink"
+      >
+        <span aria-hidden="true">‹</span> Plan
+      </Link>
+
       {message ? (
         <div className="mb-6">
           <Notice tone="ok">{message}</Notice>
