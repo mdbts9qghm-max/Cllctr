@@ -46,7 +46,7 @@ offline. Dieselbe Anleitung steht in der App unter *Einstellungen*.
 
 ```
 src/
-  app/            Screens: Heute, Plan, Aufgaben, Statistik, Seelen, Logbuch, Schicht, Setup, Daten
+  app/            Screens: Heute, Plan, Aufgaben, Statistik, Seelen, Weg, Logbuch, Schicht, Setup, Daten
   components/     Rahmen, Bausteine, Diagramme
   lib/
     types.ts      Datenmodell — die einzige Wahrheit über die Struktur
@@ -57,7 +57,7 @@ src/
     replan.ts     Adaptives Umplanen bei verpassten Einheiten
     explain.ts    Begründungen für den Heute-Screen
     tasks.ts      Energiebudget des Tages, Wiederholungen
-    way.ts        Der Weg: Bereiche, Stufen, Serien
+    way.ts        Der Weg: Bereiche, Stufen, Serien, Pfad
     way-store.ts  Freischalten und Hochstufen
     stats.ts      Auswertung und Deload-Erkennung
     pr.ts         Bestwert-Erkennung

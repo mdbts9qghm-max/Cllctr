@@ -235,3 +235,110 @@ export function nextLockedArea(areas: WayArea[]): WayArea | null {
       .sort((a, b) => a.order - b.order)[0] ?? null
   );
 }
+
+/* ------------------------------------------------------------------ */
+/* Der Pfad                                                            */
+/* ------------------------------------------------------------------ */
+
+export type WayNodeKind = 'step' | 'milestone';
+export type WayNodeState = 'done' | 'current' | 'locked';
+
+export interface WayNode {
+  id: string;
+  areaKey: string;
+  areaName: string;
+  areaOrder: number;
+  kind: WayNodeKind;
+  /** Stufe innerhalb des Bereichs; beim Etappenziel die Zahl der Schritte. */
+  index: number;
+  title: string;
+  notes: string;
+  state: WayNodeState;
+  /** Nur am aktuellen Knoten: wie weit bis zum nächsten. */
+  progress: { current: number; target: number } | null;
+}
+
+/**
+ * Der ganze Weg als Kette von Knoten — alle Bereiche hintereinander.
+ *
+ * Ein Knoten je Schritt, dazu am Ende jedes Bereichs ein Etappenziel. Was noch
+ * gesperrt ist, kommt aus dem Katalog: man soll sehen können, was kommt, sonst
+ * ist es kein Weg, sondern eine Überraschungstüte.
+ *
+ * Genau **ein** Knoten ist der aktuelle. Steht ein Bereich kurz vor dem
+ * Abschluss, rückt der aktuelle auf das Etappenziel vor — sonst hätte man zwei
+ * Stellen, an denen es weitergeht.
+ */
+export function buildPath(
+  areas: WayArea[],
+  streakOfActive: number,
+  readyForNext: boolean,
+): WayNode[] {
+  const out: WayNode[] = [];
+
+  for (const area of [...areas].sort((a, b) => a.order - b.order)) {
+    const template = WAY_BY_KEY.get(area.key);
+    if (!template) continue;
+
+    const maxLevel = template.steps.length - 1;
+    const established = area.status === 'established';
+    const active = area.status === 'active';
+
+    template.steps.forEach((step, index) => {
+      let state: WayNodeState = 'locked';
+      if (established) state = 'done';
+      else if (active) {
+        if (index < area.level || (index === area.level && readyForNext)) state = 'done';
+        else if (index === area.level) state = 'current';
+      }
+
+      out.push({
+        id: `${area.key}:${index}`,
+        areaKey: area.key,
+        areaName: area.name,
+        areaOrder: area.order,
+        kind: 'step',
+        index,
+        title: step.title,
+        notes: step.notes,
+        state,
+        progress:
+          state === 'current'
+            ? area.level >= maxLevel
+              ? { current: Math.min(streakOfActive, AREA_READY_DAYS), target: AREA_READY_DAYS }
+              : { current: Math.min(streakOfActive, LEVEL_STEP_DAYS), target: LEVEL_STEP_DAYS }
+            : null,
+      });
+    });
+
+    out.push({
+      id: `${area.key}:ziel`,
+      areaKey: area.key,
+      areaName: area.name,
+      areaOrder: area.order,
+      kind: 'milestone',
+      index: template.steps.length,
+      title: 'Etappe steht',
+      notes: `${AREA_READY_DAYS} Tage in Folge alles gehalten — danach kommt der nächste Bereich dazu.`,
+      state: established ? 'done' : active && readyForNext ? 'current' : 'locked',
+      progress:
+        active && readyForNext
+          ? { current: AREA_READY_DAYS, target: AREA_READY_DAYS }
+          : null,
+    });
+  }
+
+  return out;
+}
+
+/**
+ * Ausschnitt um den aktuellen Knoten.
+ *
+ * Der ganze Weg ist über zwanzig Knoten lang — als Erstes auf dem Aufgaben-Tab
+ * wäre das eine Wand. Hier steht nur, wo man ist und was als Nächstes kommt.
+ */
+export function pathWindow(nodes: WayNode[], before = 2, after = 4): WayNode[] {
+  const index = nodes.findIndex((n) => n.state === 'current');
+  if (index < 0) return nodes.slice(0, before + after + 1);
+  return nodes.slice(Math.max(0, index - before), index + after + 1);
+}

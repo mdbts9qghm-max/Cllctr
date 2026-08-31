@@ -1463,6 +1463,58 @@ Schema auf Version 9: Tabelle `wayAreas`, `Task.wayArea`/`wayOrder`,
 
 ---
 
+## Der Weg wird ein Pfad
+
+Die Etappe stand als Karte da: Bereich, Stufe, Serie, eine Liste Schritte. Korrekt, aber
+ohne Zug. Was fehlte, war das, was Sprach-Apps richtig machen — man **sieht** den Weg:
+wo man steht, was hinter einem liegt, was kommt.
+
+Also eine Kette von Knoten, ein Knoten je Schritt, am Ende jedes Bereichs ein
+Etappenziel. 24 Knoten insgesamt.
+
+Die Umsetzung bleibt aber in der Sprache dieser App: eine Akzentfarbe, kein Konfetti,
+keine Maskottchen, keine Belohnungstöne.
+
+| Zustand | Aussehen |
+|---|---|
+| erreicht | gefüllter Kreis, Haken |
+| aktuell | offener Kreis mit **Fortschrittsring** — die Tage bis zum nächsten Knoten |
+| gesperrt | blasser Umriss mit Nummer, Titel trotzdem lesbar |
+| Etappenziel | Raute statt Kreis — dasselbe Zeichen wie bei den Seelen |
+
+Genau **ein** Knoten ist der aktuelle. Steht ein Bereich kurz vor dem Abschluss, rückt er
+auf das Etappenziel vor, sonst hätte man zwei Stellen, an denen es weitergeht.
+
+Gesperrte Schritte stehen mit Titel da, nicht als Fragezeichen: ein Weg, dessen Ende man
+nicht sieht, ist kein Weg, sondern ein Laufband.
+
+### Technisch unspektakulär
+
+Der Schlangenlauf ist ein Versatz aus einer festen Folge (`0, 46, 64, 46, 0, −46, −64,
+−46`), die Knoten sind absolut positioniert, die Spur dazwischen sind zwei interpolierte
+Punkte. Eine echte SVG-Kurve bräuchte Koordinaten, die sich mit der Bildschirmbreite
+ändern — Punkte tun es genauso und überleben jede Breite.
+
+Der Zeilenabstand (124 px) trägt Kreis, Abstand und zwei Zeilen Beschriftung und lässt
+darunter noch Platz für die Spur. Beim ersten Versuch mit 96 px lief der Text in die
+Punkte des nächsten Knotens.
+
+### Zwei Orte
+
+Auf dem **Aufgaben-Tab** steht nur der Ausschnitt um die aktuelle Stelle — einer davor,
+drei danach. Der ganze Pfad wäre am Anfang des Tages eine Wand.
+
+**`/weg`** zeigt alles, nach Etappen gruppiert, mit einem Zähler oben (*5 von 24 Knoten*).
+Erreichbar über *Den ganzen Weg ansehen* unter dem Ausschnitt, zurück über *‹ Aufgaben* —
+dasselbe Muster wie beim Logbuch.
+
+Ein Knoten ist antippbar und zeigt Titel, Notiz und Zustand. Abgehakt wird weiter unter
+*Täglich*: Der Nutzer hatte sich ausdrücklich für **eine** Liste entschieden, und ein
+zweiter Haken am selben Schritt wäre genau das, was er nicht wollte. Das Detail sagt das
+auch so.
+
+---
+
 ## Entwicklung
 
 ```

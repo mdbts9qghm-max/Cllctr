@@ -28,7 +28,9 @@ import {
   type TaskPriority,
 } from '@/lib/types';
 import { Button, Card, Field, inputClass, Notice, Section } from '@/components/ui';
-import { AREA_READY_DAYS, chunksOf, LEVEL_STEP_DAYS, WAY_BY_KEY } from '@/lib/way';
+import { AREA_READY_DAYS, buildPath, chunksOf, pathWindow, WAY_BY_KEY } from '@/lib/way';
+import { WayPath } from '@/components/WayPath';
+import Link from 'next/link';
 import { addChunk, advanceWayLevel, evaluateWay, unlockNextArea } from '@/lib/way-store';
 
 const ENERGIES: TaskEnergy[] = ['light', 'focus', 'hard'];
@@ -106,6 +108,9 @@ export default function AufgabenPage() {
   const wayDoneToday = way.steps.filter((step) =>
     dailyState.some((d) => d.task.id === step.id && d.doneToday),
   ).length;
+  const path = buildPath(areas, way.streak, way.readyForNext);
+  const pathExcerpt = pathWindow(path, 1, 3);
+  const pathDone = path.filter((n) => n.state === 'done').length;
   const upcomingAreas = areas.filter((a) => a.status === 'locked');
   const establishedAreas = areas.filter((a) => a.status === 'established');
   const allStreak = allRoutinesStreak(tasks, dailies.map(routineFamily), todayIso);
@@ -253,35 +258,19 @@ export default function AufgabenPage() {
               />
             </div>
 
-            <ul className="mt-4 space-y-1.5 border-t border-line pt-3">
-              {way.steps.map((step) => {
-                const done = dailyState.some((d) => d.task.id === step.id && d.doneToday);
-                return (
-                  <li key={step.id} className="flex items-start gap-2.5 text-sm">
-                    <span
-                      className={`mt-1.5 size-1.5 shrink-0 rounded-full ${
-                        done ? 'bg-ember' : 'bg-line-strong'
-                      }`}
-                    />
-                    <span className={done ? 'text-ink-faint' : 'text-ink'}>{step.title}</span>
-                  </li>
-                );
-              })}
-              {way.steps.length === 0 ? (
-                <li className="text-sm text-ink-faint">Kein Schritt aktiv.</li>
-              ) : null}
-            </ul>
+            {/* Der Pfad: der Ausschnitt um die Stelle, an der du stehst. Der
+                ganze Weg ist über zwanzig Knoten lang — der gehört auf eine
+                eigene Seite, nicht an den Anfang des Tages. */}
+            <div className="mt-4 border-t border-line pt-4">
+              <WayPath nodes={pathExcerpt} />
+            </div>
 
-            {/* Was als Nächstes dazukommt — sichtbar, aber noch nicht deine
-                Aufgabe. Das nimmt dem Aufstieg die Überraschung. */}
-            {wayTemplate && way.area.level + 1 < wayTemplate.steps.length ? (
-              <p className="mt-3 border-t border-line pt-3 text-xs leading-relaxed text-ink-faint">
-                Nach {LEVEL_STEP_DAYS} Tagen in Folge kommt dazu:{' '}
-                <span className="text-ink-muted">
-                  {wayTemplate.steps[way.area.level + 1].title}
-                </span>
-              </p>
-            ) : null}
+            <Link
+              href="/weg"
+              className="mt-1 block text-center text-xs text-ember underline underline-offset-2"
+            >
+              Den ganzen Weg ansehen ({pathDone} von {path.length})
+            </Link>
 
             {way.readyForNext && upcomingAreas.length > 0 ? (
               <div className="mt-4 rounded border border-ember-dim bg-ember/10 p-3">
