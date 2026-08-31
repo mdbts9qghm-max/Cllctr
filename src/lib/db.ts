@@ -22,6 +22,7 @@ import type {
   ShiftType,
   Soul,
   Task,
+  WayArea,
 } from './types';
 
 export class CllctrDb extends Dexie {
@@ -38,6 +39,7 @@ export class CllctrDb extends Dexie {
   personalRecords!: Table<PersonalRecord, string>;
   tasks!: Table<Task, string>;
   souls!: Table<Soul, string>;
+  wayAreas!: Table<WayArea, string>;
   settings!: Table<Settings, string>;
   meta!: Table<AppMeta, string>;
 
@@ -56,8 +58,9 @@ export class CllctrDb extends Dexie {
       exercises: 'id, discipline, archived',
       setEntries: 'id, sessionLogId, exerciseId, date, [exerciseId+date]',
       personalRecords: 'id, exerciseId, date, [exerciseId+kind]',
-      tasks: 'id, status, dueDate, energy, priority, templateTaskId, [status+dueDate]',
+      tasks: 'id, status, dueDate, energy, priority, templateTaskId, wayArea, [status+dueDate]',
       souls: 'id, key, collectedAt, rarity, sourceKind',
+      wayAreas: 'key, order, status',
       settings: 'id',
       meta: 'key',
     });
@@ -87,6 +90,7 @@ export const TABLE_NAMES = [
   'personalRecords',
   'tasks',
   'souls',
+  'wayAreas',
   'meta',
 ] as const;
 

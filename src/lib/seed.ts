@@ -38,8 +38,9 @@ export const ABSENCE_SHIFT_TYPES: ShiftType[] = [
     capacity: 'full',
     trainingWindow: 'ganzer Tag',
     color: '#14b8a6',
-    note: 'Ganzer Tag frei. Zählt wie eine Freischicht — mehr freie Tage heißen aber nicht mehr Training, sondern nur, dass sich dieselben Einheiten sauberer verteilen.',
+    note: 'Ganzer Tag frei. Zählt wie eine Freischicht — mehr freie Tage heißen aber nicht mehr Training, sondern nur, dass sich dieselben Einheiten sauberer verteilen. Der Weg pausiert an diesen Tagen: die Serie reißt nicht.',
     cancelsPlanned: false,
+    pausesRoutines: true,
     isBuiltIn: true,
     sortOrder: 6,
   },
@@ -55,6 +56,7 @@ export const ABSENCE_SHIFT_TYPES: ShiftType[] = [
     color: '#a1a1aa',
     note: 'Kein Training. Geplante Einheiten an diesen Tagen entfallen ersatzlos, statt auf den nächsten Tag zu rutschen — nachholen wäre hier genau die falsche Reaktion. Sie zählen auch nicht als verpasst.',
     cancelsPlanned: true,
+    pausesRoutines: true,
     isBuiltIn: true,
     sortOrder: 7,
   },
@@ -73,6 +75,7 @@ export const DEFAULT_SHIFT_TYPES: ShiftType[] = [
     color: '#eab308',
     note: '12 Stunden. Danach ist nichts mehr drin — der Tag ist ein Ruhetag.',
     cancelsPlanned: false,
+    pausesRoutines: false,
     isBuiltIn: true,
     sortOrder: 1,
   },
@@ -88,6 +91,7 @@ export const DEFAULT_SHIFT_TYPES: ShiftType[] = [
     color: '#6366f1',
     note: 'Der Vormittag vor der Schicht ist frei: normales Volumen inklusive Kraft geht, nur nichts, was den Schlaf davor frisst.',
     cancelsPlanned: false,
+    pausesRoutines: false,
     isBuiltIn: true,
     sortOrder: 2,
   },
@@ -103,6 +107,7 @@ export const DEFAULT_SHIFT_TYPES: ShiftType[] = [
     color: '#0ea5e9',
     note: 'Tag nach der Nachtschicht, Schlaf 08:00–14:00. Nachmittags normales Volumen, keine Key-Session.',
     cancelsPlanned: false,
+    pausesRoutines: false,
     isBuiltIn: true,
     sortOrder: 3,
   },
@@ -118,6 +123,7 @@ export const DEFAULT_SHIFT_TYPES: ShiftType[] = [
     color: '#22c55e',
     note: 'Kompletter Tag frei. Hier liegen die Key-Sessions.',
     cancelsPlanned: false,
+    pausesRoutines: false,
     isBuiltIn: true,
     sortOrder: 4,
   },
@@ -133,6 +139,7 @@ export const DEFAULT_SHIFT_TYPES: ShiftType[] = [
     color: '#f97316',
     note: 'Willkürlich 08:00–20:00, kann kurzfristig vor einer Tagschicht liegen. Gehört deshalb nicht in die Rotation — sie wird auf dem Schicht-Screen als Abweichung für den betroffenen Tag gesetzt. Laufen geht während der Schicht, ins Gym kommt man dabei nicht.',
     cancelsPlanned: false,
+    pausesRoutines: false,
     isBuiltIn: true,
     sortOrder: 5,
   },
@@ -240,7 +247,7 @@ function defaultPattern(): ShiftPattern {
 export async function seedIfEmpty(): Promise<void> {
   await db.transaction(
     'rw',
-    [db.settings, db.shiftTypes, db.shiftPatterns, db.exercises, db.tasks, db.meta],
+    [db.settings, db.shiftTypes, db.shiftPatterns, db.exercises, db.tasks, db.meta, db.wayAreas],
     async () => {
     if ((await db.settings.count()) === 0) {
       await db.settings.put(defaultSettings());
@@ -269,6 +276,20 @@ export async function seedIfEmpty(): Promise<void> {
       const missing = ABSENCE_SHIFT_TYPES.filter((t) => !existing.has(t.id));
       if (missing.length > 0) await db.shiftTypes.bulkPut(missing);
       await db.meta.put({ key: ABSENCE_SHIFTS_SEEDED, value: true, updatedAt: now() });
+    }
+
+    // Die Marke, ob eine Schichtart den Weg pausiert, kam später dazu. Ohne sie
+    // würde jeder Urlaubstag als Lücke in der Serie zählen.
+    const withoutFlag = (await db.shiftTypes.toArray()).filter(
+      (t) => t.pausesRoutines === undefined,
+    );
+    if (withoutFlag.length > 0) {
+      await db.shiftTypes.bulkPut(
+        withoutFlag.map((t) => ({
+          ...t,
+          pausesRoutines: t.cancelsPlanned || t.id === 'urlaub',
+        })),
+      );
     }
     if ((await db.shiftPatterns.count()) === 0) {
       await db.shiftPatterns.put(defaultPattern());
@@ -302,6 +323,8 @@ export async function seedIfEmpty(): Promise<void> {
         status: 'open',
         recurrence: { kind: 'daily', interval: 1, weekdays: null, dayOfMonth: null },
         templateTaskId: null,
+        wayArea: null,
+        wayOrder: null,
         completedAt: null,
         createdAt: ts,
         updatedAt: ts,

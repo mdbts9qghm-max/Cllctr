@@ -57,6 +57,8 @@ src/
     replan.ts     Adaptives Umplanen bei verpassten Einheiten
     explain.ts    Begründungen für den Heute-Screen
     tasks.ts      Energiebudget des Tages, Wiederholungen
+    way.ts        Der Weg: Bereiche, Stufen, Serien
+    way-store.ts  Freischalten und Hochstufen
     stats.ts      Auswertung und Deload-Erkennung
     pr.ts         Bestwert-Erkennung
     souls.ts      Der Seelen-Katalog

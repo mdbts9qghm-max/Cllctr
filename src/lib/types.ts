@@ -12,7 +12,7 @@ export type IsoDate = string;
 export type IsoDateTime = string;
 
 /** Version des Schemas im Export. Wird bei jeder Änderung am Modell hochgezählt. */
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 /* ------------------------------------------------------------------ */
 /* Schicht                                                             */
@@ -77,6 +77,15 @@ export interface ShiftType {
    * die falsche Reaktion.
    */
   cancelsPlanned: boolean;
+  /**
+   * An solchen Tagen pausiert der Weg: eine Serie reißt nicht, zählt aber auch
+   * nicht weiter.
+   *
+   * Getrennt von `cancelsPlanned`, weil Urlaub und Krankheit sich beim Training
+   * unterscheiden (im Urlaub trainiert man, krank nicht), beim Alltag aber
+   * gleich verhalten — an beiden Tagen läuft der normale Ablauf nicht.
+   */
+  pausesRoutines: boolean;
   /** Standardarten können nicht gelöscht werden, nur bearbeitet. */
   isBuiltIn: boolean;
   sortOrder: number;
@@ -582,6 +591,13 @@ export interface Task {
   recurrence: Recurrence | null;
   /** Bei wiederkehrenden Tasks: Verweis auf die Vorlage. */
   templateTaskId: string | null;
+  /** Bereich des Wegs, zu dem diese Aufgabe gehört. Null: freie Aufgabe. */
+  wayArea: string | null;
+  /**
+   * Position im Bereich. Bei Schritten die Stufe, ab der sie dazukommen;
+   * bei Brocken null — die liegen einfach da.
+   */
+  wayOrder: number | null;
   completedAt: IsoDateTime | null;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
@@ -704,5 +720,36 @@ export interface Settings {
 export interface AppMeta {
   key: string;
   value: unknown;
+  updatedAt: IsoDateTime;
+}
+
+/* ------------------------------------------------------------------ */
+/* Der Weg                                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Ein Bereich des Wegs — Hygiene, Schlaf, Ernährung, Haushalt.
+ *
+ * `locked` heißt: noch nicht dran. `active` ist die aktuelle Etappe, an der
+ * gearbeitet wird. `established` sind die Bereiche davor: ihre Routinen laufen
+ * weiter, aber sie stehen nicht mehr im Vordergrund. Es gibt immer höchstens
+ * einen aktiven Bereich — das ist der Kern der Idee, einen nach dem anderen.
+ */
+export type WayAreaStatus = 'locked' | 'active' | 'established';
+
+export interface WayArea {
+  key: string;
+  name: string;
+  /** Feste Reihenfolge; kleiner kommt früher. */
+  order: number;
+  status: WayAreaStatus;
+  /**
+   * Wie weit der Bereich aufgebaut ist: Stufe 0 heißt ein einziger Schritt,
+   * jede weitere Stufe bringt einen dazu. Sinkt nie.
+   */
+  level: number;
+  startedAt: IsoDate | null;
+  establishedAt: IsoDate | null;
+  createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
 }

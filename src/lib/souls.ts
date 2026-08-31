@@ -27,6 +27,7 @@ import {
   type Session,
   type SessionLog,
   type Task,
+  type WayArea,
   type SessionTypeKey,
   type SoulRarity,
   type SoulSourceKind,
@@ -39,6 +40,7 @@ export interface SoulContext {
   mesocycles: Mesocycle[];
   records: PersonalRecord[];
   tasks: Task[];
+  wayAreas: WayArea[];
   shiftContext: ShiftContext;
   today: IsoDate;
 }
@@ -674,6 +676,21 @@ export const SOUL_CATALOG: SoulDefinition[] = [
     25,
   ),
 
+  {
+    key: 'way_first_step',
+    name: 'Der erste Schritt zurück',
+    description:
+      'Die erste Stufe im Weg erreicht — drei Tage in Folge dasselbe getan. Von hier aus geht es weiter.',
+    rarity: 'common',
+    sourceKind: 'streak',
+    earned: (ctx) => {
+      const any = ctx.wayAreas.find((a) => a.level >= 1);
+      return any
+        ? [{ sourceId: null, detail: any.name, date: any.startedAt ?? ctx.today }]
+        : [];
+    },
+  },
+
   routineSoul(
     'routines_3',
     'Drei Tage Ordnung',
@@ -779,6 +796,29 @@ export const SOUL_CATALOG: SoulDefinition[] = [
     5000,
   ),
 
+  {
+    key: 'way_area',
+    name: 'Etappe steht',
+    description:
+      'Ein ganzer Bereich des Wegs läuft von selbst — vierzehn Tage in Folge, durch Nachtschichten hindurch.',
+    rarity: 'rare',
+    sourceKind: 'streak',
+    earned: (ctx) =>
+      ctx.wayAreas
+        .filter((a) => a.status === 'established')
+        .map((a) => ({
+          sourceId: a.key,
+          detail: a.name,
+          date: a.establishedAt ?? ctx.today,
+        })),
+    progress: (ctx) => {
+      const established = ctx.wayAreas.filter((a) => a.status === 'established').length;
+      return ctx.wayAreas.length === 0 || established >= ctx.wayAreas.length
+        ? null
+        : { current: established, target: ctx.wayAreas.length, unit: 'Bereiche' };
+    },
+  },
+
   routineSoul(
     'routines_14',
     'Zwei Wochen Ordnung',
@@ -825,6 +865,22 @@ export const SOUL_CATALOG: SoulDefinition[] = [
       return current >= PROGRESSING_TYPES.length
         ? null
         : { current, target: PROGRESSING_TYPES.length, unit: 'Arten' };
+    },
+  },
+
+  {
+    key: 'way_complete',
+    name: 'Wieder im Griff',
+    description:
+      'Alle vier Bereiche des Wegs stehen. Hygiene, Schlaf, Ernährung, Haushalt — nichts davon kostet dich noch Überwindung.',
+    rarity: 'legendary',
+    sourceKind: 'streak',
+    earned: (ctx) => {
+      if (ctx.wayAreas.length === 0) return [];
+      const open = ctx.wayAreas.filter((a) => a.status !== 'established');
+      return open.length === 0
+        ? [{ sourceId: null, detail: `${ctx.wayAreas.length} Bereiche`, date: ctx.today }]
+        : [];
     },
   },
 

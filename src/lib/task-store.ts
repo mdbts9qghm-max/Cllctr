@@ -10,6 +10,9 @@ import type { Task, TaskEnergy, TaskKind, TaskPriority, Recurrence } from './typ
 
 export interface TaskDraft {
   kind: TaskKind;
+  /** Bereich des Wegs, falls die Aufgabe dorthin gehört. */
+  wayArea?: string | null;
+  wayOrder?: number | null;
   title: string;
   notes?: string;
   dueDate?: string | null;
@@ -34,6 +37,8 @@ export async function createTask(draft: TaskDraft): Promise<Task> {
     status: 'open',
     recurrence: draft.recurrence ?? null,
     templateTaskId: null,
+    wayArea: draft.wayArea ?? null,
+    wayOrder: draft.wayOrder ?? null,
     completedAt: null,
     createdAt: ts,
     updatedAt: ts,

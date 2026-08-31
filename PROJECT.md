@@ -1383,6 +1383,86 @@ gelöscht → Einheit **und** Protokoll weg (3/3 → 2/2). Alle neun Screens lad
 
 ---
 
+## Der Weg
+
+Der Aufgaben-Tab war eine Liste. Er wird zu einem **Weg**: von null zurück in einen
+Alltag, der trägt. Kein zweites Aufgabensystem, sondern eine Ordnung über dem, das es
+schon gibt — die Schritte des Wegs *sind* tägliche Aufgaben und stehen dort, wo alle
+täglichen Aufgaben stehen.
+
+Alle Festlegungen kommen aus drei Fragerunden mit dem Nutzer; nichts davon ist geraten.
+
+### Vier Bereiche, einer nach dem anderen
+
+| # | Bereich | Warum an dieser Stelle |
+|---|---|---|
+| 1 | Hygiene und Körper | Hängt von niemandem ab außer dir und wirkt sofort |
+| 2 | Schlaf und Erholung | Bei zwölf Stunden im Wechsel hängt alles andere daran |
+| 3 | Ernährung und Einkauf | Kleinster Sprung von dort, wo er schon ist — das Training läuft |
+| 4 | Haushalt und Ordnung | Der größte Brocken; mit stehendem Alltag Arbeit, ohne eine Wand |
+
+Nur **ein** Bereich ist aktiv. Der nächste kommt erst dazu, wenn der aktuelle steht —
+mehr Fronten gleichzeitig ist genau der Grund, warum es vorher nicht geklappt hat. Der
+vorige wird dabei nicht „abgeschlossen", sondern **established**: seine Routinen laufen
+weiter, sie stehen nur nicht mehr im Vordergrund. Etwas fertig zu nennen, was täglich
+stattfindet, wäre eine Lüge.
+
+### Stufe 0 ist lächerlich klein
+
+Ein einziger Schritt: *Zähne putzen, morgens und abends*. Wer bei null anfängt, scheitert
+an jedem ambitionierten Startpaket. Alle **3 Tage Serie** kommt ein Schritt dazu, nach
+**14 Tagen** fragt die App, ob der nächste Bereich dran ist — sie fragt, sie entscheidet
+nicht.
+
+Was als Nächstes dazukommt, steht sichtbar unter der Liste. Das nimmt dem Aufstieg die
+Überraschung, ohne ihn vorwegzunehmen.
+
+### Die Serie, und was sie nicht bricht
+
+Ein Tag zählt, wenn alles erledigt wurde, was es an dem Tag **schon gab**. Ohne diese
+Einschränkung setzte jede neue Stufe die Serie auf null: der frisch dazugekommene Schritt
+hat für gestern nichts vorzuweisen und könnte es auch nicht. Man käme nie über drei Tage
+hinaus — der Weg hätte sich selbst blockiert.
+
+Tage mit **Krank** oder **Urlaub** werden übersprungen: sie zählen nicht mit, brechen aber
+auch nicht. Dafür trägt `ShiftType` jetzt `pausesRoutines`, getrennt von
+`cancelsPlanned` — beim Training unterscheiden sich Urlaub und Krankheit (im Urlaub
+trainiert man, krank nicht), beim Alltag verhalten sie sich gleich.
+
+Reißt die Serie doch, fängt sie neu an — **die Stufe bleibt**. Wie überall in dieser App:
+nichts wird verschenkt, nichts bestraft.
+
+### Brocken
+
+Der Rückstand, der in einem Bereich liegt: Wäscheberg, Bad putzen, Kühlschrank ausräumen.
+Je Bereich gibt es einen Katalog typischer Brocken zum Übernehmen, eigene kommen über das
+normale Formular dazu. Sie gehören **nicht** in die tägliche Serie — sie schrumpfen nur,
+und der Zähler sagt, wie weit. Sie halten den nächsten Bereich auch nicht auf; der
+Freischalt-Hinweis erwähnt sie, mehr nicht.
+
+### Drei Seelen
+
+*Der erste Schritt zurück* (Stufe 1 erreicht), *Etappe steht* (ein Bereich läuft von
+selbst, je Bereich einmal), *Wieder im Griff* (alle vier stehen, legendär). Der Katalog
+ist damit bei **35**.
+
+### Geprüft
+
+Serie-Regeln als Einzeltest: lückenlos 11 Tage → 11; Lücke vor zwei Tagen → 2; dieselbe
+Lücke als Kranktag → 10 (übersprungen, nicht gebrochen); heute noch nicht abgehakt → die
+Serie von gestern bleibt; Tage vor dem ersten Schritt zählen nicht.
+
+Im Browser durchgespielt: Start bei 0/1 → nach 3 Tagen Stufe 1 mit *Duschen* → nach 14
+Tagen alle fünf Schritte und das Angebot *Schlaf und Erholung dazunehmen* → nach dem
+Freischalten Etappe 2 bei Stufe 0, Hygiene steht als „läuft". Brocken aus dem Katalog
+übernommen. Einen Weg-Schritt unter *Täglich* abgehakt → die Weg-Karte zeigt sofort 1/1
+und „1 Tag in Folge". Auf dem Heute-Screen steht er zwischen den anderen Routinen.
+
+Schema auf Version 9: Tabelle `wayAreas`, `Task.wayArea`/`wayOrder`,
+`ShiftType.pausesRoutines`.
+
+---
+
 ## Entwicklung
 
 ```

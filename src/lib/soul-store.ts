@@ -45,7 +45,18 @@ async function buildContext(): Promise<SoulContext> {
     db.personalRecords.toArray(),
     db.tasks.toArray(),
   ]);
-  return { sessions, logs, microcycles, mesocycles, records, tasks, shiftContext, today: today() };
+  const wayAreas = await db.wayAreas.toArray();
+  return {
+    sessions,
+    logs,
+    microcycles,
+    mesocycles,
+    records,
+    tasks,
+    wayAreas,
+    shiftContext,
+    today: today(),
+  };
 }
 
 /**

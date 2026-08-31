@@ -10,6 +10,7 @@ import { useSettings, useShiftContext } from '@/lib/hooks';
 import { planFingerprint } from '@/lib/planner';
 import { syncPlan } from '@/lib/plan-store';
 import { seedIfEmpty } from '@/lib/seed';
+import { seedWayIfEmpty } from '@/lib/way-store';
 import { syncSouls } from '@/lib/soul-store';
 
 /**
@@ -112,6 +113,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     seedIfEmpty()
+      .then(() => seedWayIfEmpty())
       .then(() => setReady(true))
       // Seelen können auch ohne Zutun fällig werden — etwa wenn ein Zyklus zu
       // Ende ging, während die App zu war. Einmal pro Start nachrechnen.

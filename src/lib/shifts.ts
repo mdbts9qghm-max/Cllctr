@@ -50,6 +50,7 @@ const UNKNOWN_SHIFT: ShiftType = {
   color: '#3f3f46',
   note: 'Keine Schichtart hinterlegt — der Tag wird als frei behandelt.',
   cancelsPlanned: false,
+  pausesRoutines: false,
   isBuiltIn: false,
   sortOrder: 999,
 };
