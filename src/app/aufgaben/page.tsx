@@ -36,6 +36,19 @@ import { addChunk, advanceWayLevel, evaluateWay, unlockNextArea } from '@/lib/wa
 const ENERGIES: TaskEnergy[] = ['light', 'focus', 'hard'];
 const PRIORITIES: TaskPriority[] = [1, 2, 3];
 
+type View = 'weg' | 'routinen' | 'aufgaben';
+
+const ROUTINE_GROUPS: Array<{ key: 'way' | 'own'; label: string }> = [
+  { key: 'way', label: 'Aus dem Weg' },
+  { key: 'own', label: 'Eigene Routinen' },
+];
+
+const VIEWS: Array<{ key: View; label: string }> = [
+  { key: 'weg', label: 'Weg' },
+  { key: 'routinen', label: 'Routinen' },
+  { key: 'aufgaben', label: 'Aufgaben' },
+];
+
 const ENERGY_HINT: Record<TaskEnergy, string> = {
   light: 'Nebenbei erledigt — Müll, Spülmaschine, kurzer Anruf.',
   focus: 'Braucht Kopf und ein bis zwei Stunden — Papierkram, Termin vorbereiten.',
@@ -53,6 +66,7 @@ export default function AufgabenPage() {
   const [priority, setPriority] = useState<TaskPriority>(2);
   const [recurrence, setRecurrence] = useState<RecurrenceKind | ''>('');
   const [showDone, setShowDone] = useState(false);
+  const [view, setView] = useState<View>('weg');
   const [showChunkPicker, setShowChunkPicker] = useState(false);
   const [wayMessage, setWayMessage] = useState<string | null>(null);
 
@@ -112,6 +126,7 @@ export default function AufgabenPage() {
   const pathExcerpt = pathWindow(path, 1, 3);
   const pathDone = path.filter((n) => n.state === 'done').length;
   const upcomingAreas = areas.filter((a) => a.status === 'locked');
+
   const establishedAreas = areas.filter((a) => a.status === 'established');
   const allStreak = allRoutinesStreak(tasks, dailies.map(routineFamily), todayIso);
 
@@ -121,6 +136,19 @@ export default function AufgabenPage() {
       const rank = (t: Task) => (isOverdue(t, todayIso) ? 0 : t.dueDate ? 1 : 2);
       return rank(a) - rank(b) || a.priority - b.priority || (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999');
     });
+
+  /**
+   * Die Zahlen neben den Ansichten: was dort offen ist.
+   *
+   * Am Weg gibt es nichts abzuhaken — dort steht die Etappe, nicht ein Rest.
+   * Deshalb bleibt er ohne Zahl statt eine zu erfinden. Eine Null wird ebenso
+   * weggelassen: „Aufgaben 0" ist keine Information, sondern Rauschen.
+   */
+  const counts: Record<View, number | null> = {
+    weg: null,
+    routinen: dailies.length - doneToday,
+    aufgaben: appointments.length + chores.length,
+  };
 
   function resetForm() {
     // Auch die Art zurücksetzen: Blieb sie auf "Termin" stehen, landete die
@@ -219,10 +247,40 @@ export default function AufgabenPage() {
         </div>
       ) : null}
 
+      {/* Drei Aufgaben, drei Ansichten.
+          Der Tab hatte sieben Abschnitte in einem Scroll: Weg, Energie, Neu,
+          Termine, Routinen, Haushalt, Erledigt — alle gleich laut, alle
+          gleichzeitig. Sie gehören zu drei verschiedenen Anlässen, also stehen
+          sie jetzt auch getrennt. */}
+      <div className="mb-6 flex gap-1 rounded-lg border border-line bg-surface p-1">
+        {VIEWS.map((v) => (
+          <button
+            key={v.key}
+            onClick={() => setView(v.key)}
+            aria-pressed={view === v.key}
+            className={`flex-1 rounded px-2 py-2 text-xs transition-colors ${
+              view === v.key
+                ? 'bg-surface-2 font-medium text-ink'
+                : 'text-ink-faint hover:text-ink-muted'
+            }`}
+          >
+            {v.label}
+            {counts[v.key] ? (
+              <span className={view === v.key ? 'text-ember' : 'text-ink-faint'}>
+                {' '}
+                {counts[v.key]}
+              </span>
+            ) : null}
+          </button>
+        ))}
+      </div>
+
+      {view === 'weg' ? (
+        <>
       {way.area ? (
         <Section
-          title="Der Weg"
-          hint="Ein Bereich nach dem anderen. Die Schritte stehen mit unter Täglich — hier siehst du, wo du stehst und was als Nächstes dazukommt."
+          title="Aktuelle Etappe"
+          hint="Ein Bereich nach dem anderen. Abgehakt wird unter Routinen — hier siehst du, wo du stehst."
         >
           <Card>
             <p className="text-[11px] uppercase tracking-widest text-ember">
@@ -382,25 +440,125 @@ export default function AufgabenPage() {
           )}
         </Section>
       ) : null}
+        </>
+      ) : null}
 
-      <Section title="Heute möglich" hint={budget.reason}>
-        <Card>
-          <div className="flex flex-wrap gap-2">
-            {ENERGIES.map((e) => (
-              <span
-                key={e}
-                className={`rounded border px-2.5 py-1 text-xs ${
-                  budget.allowed.includes(e)
-                    ? 'border-ok/50 text-ok'
-                    : 'border-line text-ink-faint line-through'
-                }`}
-              >
-                {TASK_ENERGY_LABEL[e]}
+      {view === 'routinen' ? (
+        <>
+      {dailies.length > 0 ? (
+        <Section
+          title="Jeden Tag"
+          hint="Erscheinen jeden Tag auf dem Heute-Screen, unabhängig von der Tagesenergie. Schritte aus dem Weg stehen mit drin — eine Liste, ein Ort zum Abhaken."
+        >
+          {/* Der Tagesstand als Kette: gefüllte Glieder sind erledigt. Kein
+              Konfetti, aber sichtbar, wie weit der Tag ist. */}
+          <Card className="mb-3">
+            <div className="mb-3 flex items-baseline justify-between gap-3">
+              <span className="text-2xl font-semibold text-ink tabular">
+                {doneToday}
+                <span className="text-base font-normal text-ink-faint"> / {dailies.length}</span>
               </span>
+              <span className="text-[11px] uppercase tracking-widest text-ink-faint">
+                heute erledigt
+              </span>
+            </div>
+
+            <div className="flex gap-1">
+              {dailyState.map((d) => (
+                <span
+                  key={d.task.id}
+                  title={d.task.title}
+                  className={`h-1.5 flex-1 rounded-full ${d.doneToday ? 'bg-ember' : 'bg-line-strong'}`}
+                />
+              ))}
+            </div>
+
+            <p className="mt-3 border-t border-line pt-3 text-xs leading-relaxed text-ink-faint">
+              {allStreak === 0
+                ? 'Noch kein voller Tag in Folge. Der erste zählt ab heute.'
+                : `Alles erledigt an ${allStreak} ${allStreak === 1 ? 'Tag' : 'Tagen'} in Folge.`}
+            </p>
+          </Card>
+
+          {ROUTINE_GROUPS.map((group) => {
+            const rows = dailyState.filter((d) =>
+              group.key === 'way' ? d.task.wayArea !== null : d.task.wayArea === null,
+            );
+            if (rows.length === 0) return null;
+            return (
+              <div key={group.key} className="mb-5">
+                {/* Woher eine Routine kommt, entscheidet, ob man sie streichen
+                    darf: ein Weg-Schritt gehört zur Etappe, eine eigene nicht. */}
+                <div className="mb-2 flex items-baseline justify-between">
+                  <h4 className="text-xs uppercase tracking-widest text-ink-faint">
+                    {group.label}
+                  </h4>
+                  <span className="text-[11px] text-ink-faint tabular">
+                    {rows.filter((d) => d.doneToday).length} / {rows.length}
+                  </span>
+                </div>
+
+          <div className="space-y-1.5">
+            {rows.map(({ task: t, streak, grid }) => (
+              <div key={t.id} className="rounded border border-line bg-surface">
+                <TaskRow task={t} bare />
+                <div className="flex items-center gap-3 border-t border-line px-3 py-2">
+                  {/* Sieben Tage zurück. Eine Lücke sieht man sofort — genau
+                      das ist der Antrieb, keine zu lassen. */}
+                  <div className="flex gap-1" aria-label="Letzte sieben Tage">
+                    {grid.map((cell) => (
+                      <span
+                        key={cell.date}
+                        title={cell.date}
+                        className={`size-2.5 rounded-sm ${
+                          cell.done
+                            ? 'bg-ember'
+                            : cell.date === todayIso
+                              ? 'border border-ember-dim'
+                              : 'bg-line-strong'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                  <span className="flex-1" />
+                  <span
+                    className={`text-[11px] tabular ${streak >= 2 ? 'text-ember' : 'text-ink-faint'}`}
+                  >
+                    {streak === 0 ? 'keine Serie' : `${streak} ${streak === 1 ? 'Tag' : 'Tage'} in Folge`}
+                  </span>
+                </div>
+              </div>
             ))}
           </div>
-        </Card>
-      </Section>
+              </div>
+            );
+          })}
+        </Section>
+      ) : null}
+        </>
+      ) : null}
+
+      {view === 'aufgaben' ? (
+        <>
+      {/* Was der Tag hergibt — eine Zeile, keine eigene Sektion. Es ist der
+          Rahmen für die Liste darunter, nicht selbst ein Thema. */}
+      <div className="mb-6">
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {ENERGIES.map((e) => (
+            <span
+              key={e}
+              className={`rounded border px-2 py-0.5 text-[11px] ${
+                budget.allowed.includes(e)
+                  ? 'border-ok/50 text-ok'
+                  : 'border-line text-ink-faint line-through'
+              }`}
+            >
+              {TASK_ENERGY_LABEL[e]}
+            </span>
+          ))}
+        </div>
+        <p className="text-xs leading-relaxed text-ink-faint">{budget.reason}</p>
+      </div>
 
       <Section title="Neu">
         {adding ? (
@@ -537,82 +695,7 @@ export default function AufgabenPage() {
         </Section>
       ) : null}
 
-      {dailies.length > 0 ? (
-        <Section
-          title="Täglich"
-          hint="Routinen. Erscheinen jeden Tag auf dem Heute-Screen, unabhängig von der Tagesenergie. Schritte aus dem Weg stehen mit drin — eine Liste, ein Ort zum Abhaken."
-        >
-          {/* Der Tagesstand als Kette: gefüllte Glieder sind erledigt. Kein
-              Konfetti, aber sichtbar, wie weit der Tag ist. */}
-          <Card className="mb-3">
-            <div className="mb-3 flex items-baseline justify-between gap-3">
-              <span className="text-2xl font-semibold text-ink tabular">
-                {doneToday}
-                <span className="text-base font-normal text-ink-faint"> / {dailies.length}</span>
-              </span>
-              <span className="text-[11px] uppercase tracking-widest text-ink-faint">
-                heute erledigt
-              </span>
-            </div>
-
-            <div className="flex gap-1">
-              {dailyState.map((d) => (
-                <span
-                  key={d.task.id}
-                  title={d.task.title}
-                  className={`h-1.5 flex-1 rounded-full ${d.doneToday ? 'bg-ember' : 'bg-line-strong'}`}
-                />
-              ))}
-            </div>
-
-            <p className="mt-3 border-t border-line pt-3 text-xs leading-relaxed text-ink-faint">
-              {allStreak === 0
-                ? 'Noch kein voller Tag in Folge. Der erste zählt ab heute.'
-                : `Alles erledigt an ${allStreak} ${allStreak === 1 ? 'Tag' : 'Tagen'} in Folge.`}
-            </p>
-          </Card>
-
-          <div className="space-y-1.5">
-            {dailyState.map(({ task: t, streak, grid }) => (
-              <div key={t.id} className="rounded border border-line bg-surface">
-                <TaskRow task={t} bare />
-                <div className="flex items-center gap-3 border-t border-line px-3 py-2">
-                  {t.wayArea ? (
-                    <span className="shrink-0 text-[10px] uppercase tracking-widest text-ember">
-                      Weg
-                    </span>
-                  ) : null}
-                  {/* Sieben Tage zurück. Eine Lücke sieht man sofort — genau
-                      das ist der Antrieb, keine zu lassen. */}
-                  <div className="flex gap-1" aria-label="Letzte sieben Tage">
-                    {grid.map((cell) => (
-                      <span
-                        key={cell.date}
-                        title={cell.date}
-                        className={`size-2.5 rounded-sm ${
-                          cell.done
-                            ? 'bg-ember'
-                            : cell.date === todayIso
-                              ? 'border border-ember-dim'
-                              : 'bg-line-strong'
-                        }`}
-                      />
-                    ))}
-                  </div>
-                  <span className="flex-1" />
-                  <span
-                    className={`text-[11px] tabular ${streak >= 2 ? 'text-ember' : 'text-ink-faint'}`}
-                  >
-                    {streak === 0 ? 'keine Serie' : `${streak} ${streak === 1 ? 'Tag' : 'Tage'} in Folge`}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Section>
-      ) : null}
-
-      <Section title={`Haushalt (${chores.length})`}>
+      <Section title={chores.length > 0 ? `Haushalt (${chores.length})` : 'Haushalt'}>
         {chores.length === 0 ? (
           <Notice tone="info">Nichts offen.</Notice>
         ) : (
@@ -623,6 +706,8 @@ export default function AufgabenPage() {
           </div>
         )}
       </Section>
+
+
 
       {done.length > 0 ? (
         <Section title="Erledigt">
@@ -636,6 +721,8 @@ export default function AufgabenPage() {
             <Button onClick={() => setShowDone(true)}>Letzte {done.length} anzeigen</Button>
           )}
         </Section>
+        ) : null}
+        </>
       ) : null}
     </>
   );

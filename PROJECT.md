@@ -1515,6 +1515,45 @@ auch so.
 
 ---
 
+## Ordnung im Aufgaben-Tab
+
+Der Tab war gewachsen, nicht gebaut: **sieben Abschnitte in einem Scroll** — Der Weg,
+Heute möglich, Neu, Termine, Täglich, Haushalt, Erledigt. Alle gleich laut, alle
+gleichzeitig sichtbar, der Knopf zum Anlegen mittendrin. Der Weg allein war länger als
+ein Bildschirm.
+
+Das Problem war nicht die Menge, sondern dass drei verschiedene Anlässe übereinander
+lagen. Man kommt aus einem von drei Gründen hierher:
+
+| Anlass | Ansicht |
+|---|---|
+| Wo stehe ich? | **Weg** — Etappe, Pfadausschnitt, Brocken, kommende Bereiche |
+| Was ist heute dran? | **Routinen** — Tagesstand, Serien, Sieben-Tage-Raster |
+| Was liegt sonst an? | **Aufgaben** — Energie des Tages, Neu, Termine, Haushalt, Erledigt |
+
+Also stehen sie jetzt getrennt, hinter einem Umschalter am Kopf des Tabs. Neben
+*Routinen* und *Aufgaben* steht, wie viel dort offen ist; am *Weg* nicht, denn dort gibt
+es nichts abzuhaken — dort steht eine Etappe, kein Rest. Eine Null wird weggelassen:
+„Aufgaben 0" ist keine Information, sondern Rauschen.
+
+### Innerhalb der Ansichten
+
+- **Heute möglich** war eine eigene Sektion mit Karte für drei Chips. Jetzt eine Zeile
+  über der Liste — es ist der Rahmen für das, was darunter steht, nicht selbst ein Thema.
+- **Neu** stand zwischen Haushalt und Erledigt. Jetzt oben in der Aufgaben-Ansicht: es
+  ist die Hauptaktion dort, nicht ein Nachtrag.
+- **Routinen** sind nach Herkunft gruppiert — *Aus dem Weg* und *Eigene Routinen*, jeweils
+  mit eigenem Tagesstand. Woher eine Routine kommt, entscheidet, ob man sie streichen
+  darf: ein Weg-Schritt gehört zur Etappe, eine eigene nicht. Das kleine „Weg"-Etikett an
+  der einzelnen Zeile ist damit überflüssig geworden und entfallen.
+- Der Weg braucht keine Überschrift „Der Weg" mehr — die Ansicht heißt so. Sie heißt jetzt
+  *Aktuelle Etappe*.
+
+Die Ansicht bleibt beim Wechseln nicht gespeichert: Der Weg ist der Rahmen, also steht er
+beim Öffnen da.
+
+---
+
 ## Entwicklung
 
 ```
