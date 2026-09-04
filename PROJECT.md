@@ -1635,21 +1635,21 @@ Danach schneiden die globalen Regeln nach unten:
 - **Zwei harte Tage in Folge** → der dritte wird leichter.
 - **Deload-Woche** → nichts Hartes.
 
-### Erholung kommt von Hand
+### Erholung wird geschätzt, nicht eingetragen
 
-Cllctr hat keinen Server, keinen Login und keinen Zugriff auf eine Uhr — es gibt niemanden,
-der die Erholung liefern könnte. Sie wird deshalb pro Tag eingetragen (Tabelle `readiness`,
-Primärschlüssel Datum), bewusst grob: niedrig/mittel/hoch, Schlafstunden, Schlafschuld in
-drei Stufen. Was man morgens in fünf Sekunden ehrlich beantworten kann, wird eingetragen.
+Cllctr hat keinen Server, keinen Login und keinen Zugriff auf eine Uhr. Eingetragen werden
+deshalb **Zahlen** — Recovery in Prozent, Schlaf, Sleep Debt, HRV, Ruhepuls (Tabelle
+`readiness`, Primärschlüssel Datum). Die Stufe niedrig/mittel/hoch leitet `recovery.ts`
+daraus ab; wie, steht unter *Die Erholung schätzt sich selbst*.
 
-Für einen Tag **ohne Eintrag** gilt:
+Für einen Tag **ohne Werte** gilt:
 
 - **heute und in der Vergangenheit** → `mid`. Wie es einem geht, weiß man am selben Tag;
   wer nichts einträgt, bekommt keine harte Einheit geschenkt.
 - **in der Zukunft** → `high`. Das ist keine Annahme über den Körper, sondern über den
   Plan: Er muss die harten Einheiten irgendwo hinlegen, sonst gibt es nie welche und die
-  Steigerung steht still. Trägt man später etwas Schlechteres ein, gibt der Plan von selbst
-  nach — das ist die Richtung, in der die Regel wirken soll.
+  Steigerung steht still. Kommen später Zahlen dazu, gibt der Plan von selbst nach — das
+  ist die Richtung, in der die Regel wirken soll.
 
 Ohne diese Unterscheidung war der erzeugte Plan über acht Wochen **komplett ohne harte
 Einheit**: Alles stand auf `mid`, und `mid` deckelt überall auf mittel.
@@ -1877,6 +1877,106 @@ Der Katalog steht damit bei 23 Seelen. `SoulContext` trägt jetzt die Erholungse
 
 `DayReadiness.whoop` (Rohwerte), `recoveryFromWhoop()` und `sleepDebtFromHours()` in
 `types.ts`, `setWhoop()` in `readiness.ts`.
+
+---
+
+## Die Erholung schätzt sich selbst
+
+Es gab drei Knöpfe: niedrig, mittel, hoch. Sie sind weg.
+
+### Warum sie weg mussten
+
+Eine eingetragene Stufe neben den Messwerten ist eine **zweite Wahrheit**. Stand auf der Uhr
+28 % und im Knopf „mittel", wusste niemand, welche gilt — und die App musste sich für eine
+entscheiden, ohne dass das je festgelegt worden wäre. Dazu kommt: Wer morgens um sechs nach
+einer Nachtschicht eine Selbsteinschätzung abgeben soll, drückt „mittel", weil das die Mitte
+ist. Das ist keine Information, das ist ein Standardwert mit Handarbeit.
+
+`DayReadiness` enthält deshalb nur noch Zahlen. `recovery` und `sleepDebt` sind aus dem
+Datensatz verschwunden und werden bei jedem Zugriff neu abgeleitet. Eine gespeicherte Stufe
+würde ohnehin veralten, sobald sich die persönliche Basislinie verschiebt: Dann stünde in
+der Datenbank eine Einschätzung, die aus Zahlen stammt, die inzwischen etwas anderes
+bedeuten.
+
+### Wie geschätzt wird (`recovery.ts`)
+
+Drei Stufen, in dieser Reihenfolge:
+
+1. **Recovery in Prozent** — liegt sie vor, ist sie die Antwort (`basis: 'measured'`).
+   WHOOP verrechnet dafür bereits HRV, Ruhepuls, Schlaf und Atemfrequenz; diesen Wert mit
+   unseren schwächeren Signalen zu überstimmen wäre schlechter, nicht besser. Grenzen sind
+   WHOOPs eigene Farbbereiche: ≤ 33 rot, ≤ 66 gelb, darüber grün.
+2. **Ein Punktestand** aus den übrigen Werten (`basis: 'derived'`). Ab **+2** hoch, ab
+   **−2** niedrig, dazwischen mittel:
+
+   | Signal | Punkte |
+   |---|---|
+   | Schlaf < 5 h / < 6 h / ≥ 7,5 h | −2 / −1 / +1 |
+   | Schlafschuld groß / etwas | −2 / −1 |
+   | HRV ≤ −12 % / ≤ −6 % / ≥ +8 % gegen die eigene Basislinie | −2 / −1 / +1 |
+   | Ruhepuls ≥ +5 / ≥ +3 / ≤ −3 Schläge gegen die eigene Basislinie | −2 / −1 / +1 |
+   | Tag nach der Nachtschicht | −1 |
+
+3. **Der Zusammenhang**, wenn nichts gemessen wurde (`basis: 'assumed'`) — die Regel von
+   oben: heute und rückwärts `mid`, künftige Tage `high`. Mit einer Ausnahme: **nach einer
+   Nachtschicht** bleibt es bei `mid`. Einen solchen Tag als erholt anzunehmen und den Grund
+   darunter zu nennen, ohne dass er wirkt, wäre ein Widerspruch auf einem Bildschirm.
+
+**Gegen die eigene Basislinie, nicht gegen ein Lehrbuch.** Eine HRV von 45 ms ist für den
+einen hervorragend und für den anderen ein Alarmsignal. Verglichen wird deshalb mit dem
+eigenen Schnitt der letzten 21 Tage — und unter vier Werten wird gar nicht verglichen, weil
+ein Schnitt aus zwei Zahlen kein Schnitt ist, sondern Zufall.
+
+**Die Schlafschuld** kommt aus dem Feld, wenn es gefüllt ist (WHOOP weist sie aus), sonst
+aus den letzten vier Nächten gegen 7,5 Stunden. Unter zwei bekannten Nächten wird nichts
+behauptet.
+
+### Was bewusst nicht einfließt
+
+**Die Trainingslast der letzten Tage.** Harte Tage in Folge und das Wochenkontingent sind
+bereits Regeln in `rules.ts`. Sie zusätzlich in die Erholung zu rechnen hieße, dieselbe
+Belastung zweimal abzuziehen — der Plan bräche nach jeder harten Woche ein, ohne dass ein
+einziger Messwert das hergäbe. Der **Day Strain** wird deshalb gespeichert, aber nicht
+ausgewertet.
+
+### In der Oberfläche
+
+Aus der Karte *Erholung* ist die Karte **Werte** geworden: drei Felder (Recovery, Schlaf,
+Sleep Debt), drei weitere hinter dem Aufklapper (HRV, Ruhepuls, Strain). Darunter steht die
+Schlussfolgerung — „Erholung niedrig · gemessen · 26 % Recovery — das ist niedrig" — samt
+den einzelnen Signalen, die dazu geführt haben. Kein Knopf, weil es keine Eingabe ist.
+
+Die Schätzung läuft an **einer** Stelle: `explainDay()` gibt sie zusammen mit der Regel
+zurück, der Generator rechnet sie für den ganzen Zeitraum in einem Durchgang vor
+(`recoveryTimeline`), und die Seelen fragen dieselbe Funktion. Zwei Rechnungen nebeneinander
+wären der sichere Weg zu einem Plan, der etwas anderes sagt als die Anzeige daneben.
+
+### Zwei Fehler beim Durchspielen
+
+- **Ein Wettlauf beim Tippen.** `setMeasurement()` las den Datensatz, änderte ein Feld und
+  schrieb zurück. Zwei Felder schnell hintereinander getippt, und der zweite Aufruf las den
+  Stand von *vor* dem ersten und schrieb dessen Änderung wieder weg — eine gelöschte
+  Recovery stand danach wieder da. Jetzt läuft beides in einer Dexie-Transaktion.
+- **Der Index auf ein Feld, das es nicht mehr gibt.** `readiness` war auf `date, recovery`
+  indiziert. Datenbankversion 3 zieht den Index auf `date` zurück und bringt bestehende
+  Einträge auf die flache Form: Die Werte lagen eine Version lang in einem `whoop`-Objekt.
+
+### Geprüft
+
+Eigene Testreihe gegen die Schätzregeln, nicht gegen den Code: alle drei Prozentbereiche;
+dass die Prozentzahl von schlechten Nebenwerten nicht überstimmt wird; Schlafdauer allein;
+Basislinie aus zehn Tagen und die Weigerung, aus zwei Werten eine zu bilden; HRV und
+Ruhepuls in beide Richtungen; eine absolute HRV ohne Basislinie darf nichts auslösen;
+Schlafschuld aus vier kurzen Nächten; die vier Fälle ohne Werte inklusive Nachtschicht.
+Dazu drei vollständige Vier-Wochen-Pläne: ohne Werte (harte Einheiten vorhanden), bei
+durchgehend 20 % Recovery und bei durchgehend 4,5 h Schlaf (nichts über locker), bei 85 %
+(harte Einheiten, aber nie mehr als drei pro Woche und nie drei Tage in Folge).
+
+### Schema 12
+
+`DayReadiness` flach und nur noch Messwerte: `sleepHours`, `recoveryPct`, `sleepDebtHours`,
+`strain`, `hrvMs`, `restingHr`. `recovery` und `sleepDebt` entfallen als gespeicherte
+Felder.
 
 ---
 
