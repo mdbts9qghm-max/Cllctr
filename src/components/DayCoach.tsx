@@ -63,6 +63,8 @@ export function DayCoach({
   sessions,
   allSessions,
   isDeloadWeek = false,
+  showRules = true,
+  showNutrition = true,
 }: {
   day: ResolvedShiftDay;
   settings: Settings;
@@ -71,6 +73,15 @@ export function DayCoach({
   /** Alle Einheiten — für "harte Tage in Folge" und "diese Woche". */
   allSessions: Array<{ date: string; type: SessionTypeKey; status: string }>;
   isDeloadWeek?: boolean;
+  /**
+   * Zeigt, was der Tag hergibt. Auf dem Heute-Screen aus: dort steht die
+   * Einheit selbst darunter und begründet sich über `planReason` schon selbst —
+   * die Regel ein zweites Mal darüber zu stellen, sagt nichts Neues und
+   * schiebt das, worum es geht, nach unten.
+   */
+  showRules?: boolean;
+  /** Zeigt die Ernährungsempfehlung. Auf dem Heute-Screen aus — dafür gibt es einen eigenen Tab. */
+  showNutrition?: boolean;
 }) {
   // useLiveQuery liefert undefined sowohl beim Laden als auch, wenn es für den
   // Tag keinen Eintrag gibt. Beides führt zum selben Ergebnis — dem Normalfall
@@ -194,6 +205,7 @@ export function DayCoach({
       </div>
 
       {/* --- Was die Regeln sagen --------------------------------------- */}
+      {showRules ? (
       <div className="rounded border border-line bg-surface p-3">
         <div className="mb-2 flex items-baseline justify-between gap-2">
           <p className="text-xs uppercase tracking-widest text-ink-faint">Was heute geht</p>
@@ -223,8 +235,10 @@ export function DayCoach({
           </p>
         ) : null}
       </div>
+      ) : null}
 
       {/* --- Ernährung --------------------------------------------------- */}
+      {showNutrition ? (
       <div className="rounded border border-line bg-surface p-3">
         <p className="mb-2 text-xs uppercase tracking-widest text-ink-faint">Ernährung</p>
         <p className="text-sm leading-relaxed text-ink">{nutrition.headline}</p>
@@ -255,6 +269,7 @@ export function DayCoach({
           </ul>
         ) : null}
       </div>
+      ) : null}
     </div>
   );
 }

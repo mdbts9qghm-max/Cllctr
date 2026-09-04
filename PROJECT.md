@@ -1711,11 +1711,15 @@ Stunden Arbeit einpacken.
 
 ### Wo das im Alltag auftaucht
 
-Eine Karte, `DayCoach`, auf dem Heute-Screen und im Tagesdetail des Plans. Sie enthält die
-drei Dinge in der Reihenfolge, in der sie zusammenhängen: **Erholung eintragen** (die
-Eingabe), **was heute geht** (die Folgerung), **Ernährung** (die zweite Folgerung). Sie auf
-drei Ecken der App zu verteilen hieße, genau den Zusammenhang zu verstecken, auf den es
-ankommt.
+Eine Karte, `DayCoach`, mit drei Teilen: **Erholung eintragen** (die Eingabe), **was heute
+geht** (die Folgerung), **Ernährung** (die zweite Folgerung).
+
+Im **Tagesdetail des Plans** stehen alle drei — dort geht es genau um den Zusammenhang.
+Auf dem **Heute-Screen** steht nur die Erholung (`showRules={false}`,
+`showNutrition={false}`): Die Einheit darunter begründet sich über `planReason` schon
+selbst, und für die Ernährung gibt es einen eigenen Tab. Beides zusätzlich anzuzeigen hieß,
+den Heute-Screen mit Erklärungen zu füllen und das, worum es geht — was heute ansteht —,
+unter den Rand zu schieben.
 
 Jede geplante Einheit trägt zusätzlich `planReason`: den Satz aus dem Regelwerk, der
 erklärt, warum an diesem Tag diese Intensität steht. `explain.ts` benutzt ihn, statt aus

@@ -191,9 +191,14 @@ export default function HeutePage() {
           <CapacityBadge capacity={day.capacity} label={CAPACITY_LABEL[day.capacity]} />
         </Link>
 
-        {/* Erholung, Regel und Ernährung des Tages. Steht hier oben, weil die
-            Erholung die Eingabe ist, von der alles Weitere abhängt — und weil
-            sie sonst nie eingetragen würde. */}
+        {/* Nur die Erholung — die Eingabe, von der alles Weitere abhängt, und
+            die sonst nie gemacht würde.
+
+            Regel und Ernährung stehen bewusst nicht mehr hier: Die Einheit
+            darunter begründet sich über `planReason` schon selbst, und für die
+            Ernährung gibt es einen eigenen Tab. Beides zusätzlich anzuzeigen
+            hieß, den Heute-Screen mit Erklärungen zu füllen und das, worum es
+            geht — was heute ansteht —, unter den Rand zu schieben. */}
         <div className="mb-4">
           <DayCoach
             day={day}
@@ -201,6 +206,8 @@ export default function HeutePage() {
             sessions={todaySessions}
             allSessions={data.sessions}
             isDeloadWeek={micro?.isDeload ?? false}
+            showRules={false}
+            showNutrition={false}
           />
         </div>
 
