@@ -27,6 +27,7 @@ import {
   sessionForm,
   type ProgressionLevels,
 } from './progression';
+import { readinessRange } from './readiness';
 import type { ShiftContext } from './shifts';
 import type {
   IsoDate,
@@ -102,10 +103,19 @@ export async function createAndSavePlan(input: PlanInput): Promise<GeneratedPlan
 
   // sessionLogs gehört in den Transaktionsbereich, weil das Aufräumen prüft,
   // welche Sessions bereits protokolliert sind — ohne das bricht Dexie ab.
-  // settings ebenso: dort steht der fortgeschriebene Stufenstand.
+  // settings ebenso: dort steht der fortgeschriebene Stufenstand, und
+  // readiness, weil der Generator die Erholung der geplanten Tage liest.
   await db.transaction(
     'rw',
-    [db.macrocycles, db.mesocycles, db.microcycles, db.sessions, db.sessionLogs, db.settings],
+    [
+      db.macrocycles,
+      db.mesocycles,
+      db.microcycles,
+      db.sessions,
+      db.sessionLogs,
+      db.settings,
+      db.readiness,
+    ],
     async () => {
       // Der Stand ergibt sich aus den erledigten Einheiten — die überleben das
       // Löschen, also muss er nicht vorher gerettet werden.
@@ -123,11 +133,28 @@ export async function createAndSavePlan(input: PlanInput): Promise<GeneratedPlan
           )
           .map((s) => ({ date: s.date, type: s.type }));
 
+      // Harte Tage vor dem Startdatum: ohne sie könnte direkt hinter zwei
+      // harten Tagen ein dritter stehen.
+      const history = (await db.sessions.toArray())
+        .filter(
+          (s) =>
+            s.date < input.startDate &&
+            s.date >= addDays(input.startDate, -8) &&
+            s.status !== 'skipped' &&
+            s.status !== 'missed',
+        )
+        .map((s) => ({ date: s.date, type: s.type }));
+
+      const until = input.until ?? planningHorizon(input.ctx, input.weeks, input.startDate);
+      const readiness = input.readiness ?? (await readinessRange(input.startDate, until));
+
       plan = generateTrainingPlan({
         ...input,
         progressionBase,
         completed,
-        until: input.until ?? planningHorizon(input.ctx),
+        history: input.history ?? history,
+        readiness,
+        until,
       });
 
       await clearPlanFrom(input.startDate);
@@ -146,20 +173,27 @@ export async function createAndSavePlan(input: PlanInput): Promise<GeneratedPlan
 /**
  * Bis wann überhaupt geplant werden kann.
  *
- * Mit Rotation: unbegrenzt, die Folge wiederholt sich ja. Ohne Rotation nur bis
- * zum letzten eingetragenen Tag — was danach kommt, weiß niemand.
+ * Mit Rotation reicht der Plan die vollen Wochen weit, weil sich die Folge
+ * wiederholt. Ohne Rotation endet er am letzten eingetragenen Schichttag — was
+ * danach kommt, weiß niemand, und geraten wird nicht.
  */
-export function planningHorizon(ctx: ShiftContext): IsoDate | undefined {
-  if (ctx.pattern && ctx.pattern.sequence.length > 0) return undefined;
+export function planningHorizon(ctx: ShiftContext, weeks: number, from: IsoDate): IsoDate {
+  const full = addDays(from, Math.max(1, weeks) * 7 - 1);
+  if (ctx.pattern && ctx.pattern.sequence.length > 0) return full;
   const dates = ctx.overrides.map((o) => o.date).sort();
-  return dates[dates.length - 1];
+  const last = dates[dates.length - 1];
+  if (!last) return from;
+  return last < full ? last : full;
 }
 
 /**
- * Wie viele Blöcke im Voraus geplant werden. Muss zum Plan-Screen passen —
- * eine Anpassung soll den Planungshorizont nicht heimlich verändern.
+ * Wie viele Kalenderwochen im Voraus geplant werden.
+ *
+ * Zwölf, damit im Monatsraster immer der laufende und die beiden folgenden
+ * Monate stehen. Weiter zu planen brächte nichts: Bis dahin haben sich
+ * Schichten und Erholung ohnehin geändert, und der Plan passt sich dann an.
  */
-export const MESOCYCLE_COUNT = 3;
+export const PLAN_WEEKS = 12;
 
 /**
  * Passt den Plan an, wenn sich die Grundlage geändert hat.
@@ -188,11 +222,14 @@ export async function syncPlan(
   // Ein Plan, der ganz in der Vergangenheit liegt, wird nicht mehr angefasst —
   // es sei denn, es sind Schichten für die Zukunft eingetragen. Dann gibt es
   // wieder etwas zu planen.
-  const horizon = planningHorizon(ctx);
+  const horizon = planningHorizon(ctx, PLAN_WEEKS, from);
   const reach = [macro.endDate, horizon].filter((d): d is IsoDate => d !== null && d !== undefined);
   if (reach.length === 0 || reach.every((d) => d < from)) return null;
 
-  const current = planFingerprint(ctx, settings, from);
+  // Die Erholung gehört zur Grundlage: Trägt man für morgen "niedrig" ein, muss
+  // der Plan das von selbst berücksichtigen, ohne dass man etwas drückt.
+  const readiness = await readinessRange(from, horizon);
+  const current = planFingerprint(ctx, settings, from, readiness);
   if (macro.inputFingerprint === '') {
     // Plan von vor der Automatik: Fingerabdruck nachtragen, aber nicht neu
     // planen — sonst würde ein Update den Plan ungefragt umbauen.
@@ -219,8 +256,10 @@ export async function syncPlan(
     startDate: from,
     ctx,
     settings,
-    mesocycleCount: MESOCYCLE_COUNT,
+    weeks: PLAN_WEEKS,
     name: macro.name,
+    readiness,
+    until: horizon,
   });
 
   const after = dayMap(plan.sessions);

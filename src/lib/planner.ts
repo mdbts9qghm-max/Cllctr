@@ -1,568 +1,300 @@
 /**
  * Trainingsgenerator.
  *
- * Plant auf **Rotationszyklen**, nicht auf Kalenderwochen: ein Mikrozyklus ist
- * ein voller Durchlauf der Schichtrotation. Nur so ist jeder Zyklus gleich
- * aufgebaut und die Belastung schwankt nicht damit, wie die Rotation gerade in
- * der Woche liegt. Die Anzeige rechnet das für den Nutzer in Wochen zurück.
+ * Läuft **Tag für Tag** durch den Kalender. Für jeden Tag steht die Frage in
+ * derselben Reihenfolge wie im Regelwerk:
  *
- * Der eigentliche Engpass sind die vollen Tage: pro Zyklus gibt es davon nur
- * zwei, und drei Session-Typen konkurrieren darum (Intervalle, Long Run, Kraft
- * Unterkörper). Welcher gewinnt, entscheidet das Planungsprofil.
+ *   1. Was gibt die Erholung her?   (readiness)
+ *   2. Was gibt die Schicht her?    (rules.dayAllowance)
+ *   3. Was fehlt der Woche noch?    (rules.chooseSession)
+ *
+ * Vorher wurde auf Rotationszyklen geplant und die Einheiten wurden per
+ * Best-Fit auf die Tage verteilt. Das konnte die neuen Regeln nicht abbilden:
+ * Sie hängen an der Erholung des einzelnen Tages und an Wochengrenzen —
+ * höchstens drei harte Einheiten pro Woche, nie mehr als zwei harte Tage in
+ * Folge, Volumensteigerung von Woche zu Woche. Ein Verfahren, das erst alle
+ * Wünsche sammelt und dann verteilt, kann keine davon zuverlässig einhalten.
+ *
+ * Ein Mikrozyklus ist deshalb jetzt eine Kalenderwoche.
  */
 
-import { addDays, daysBetween, mod } from './dates';
+import { addDays, dateRange, daysBetween, startOfWeek, today } from './dates';
 import { newId, now } from './ids';
-import { capacityAllows, type ShiftContext, resolveShiftRange } from './shifts';
+import { type ShiftContext, resolveShiftRange } from './shifts';
+import { plannedRecovery, sleepDebtOf } from './readiness';
 import {
-  levelOf,
-  progresses,
-  sessionForm,
-  type ProgressionLevels,
-} from './progression';
+  addToLedger,
+  chooseSession,
+  dayAllowance,
+  emptyLedger,
+  restAdvice,
+  type DayAllowance,
+  type DayContext,
+  type WeekLedger,
+} from './rules';
+import { levelOf, progresses, sessionForm, type ProgressionLevels } from './progression';
 import {
-  CAPACITY_RANK,
   SESSION_TYPES,
+  type DayReadiness,
   type IsoDate,
   type Macrocycle,
   type Mesocycle,
   type Microcycle,
-  type PlanningProfile,
   type ResolvedShiftDay,
   type Session,
   type SessionTypeKey,
   type Settings,
-  type WeeklyTargets,
 } from './types';
 
-/**
- * Keine zwei harten Tage in Folge.
- *
- * Als hart zählen nur Intervalle, Tempolauf und Long Run (siehe
- * SessionTypeMeta.countsAsHardDay) — Krafttraining nicht. Deshalb lassen sich
- * die beiden nebeneinanderliegenden freien Tage trotz dieser strengen Regel
- * beide nutzen: einer bekommt den harten Lauf, der andere Gym.
- */
-const MAX_CONSECUTIVE_HARD_DAYS = 1;
-
-/**
- * Titel ohne Deload-Zusatz.
- *
- * Der Zyklus ist im Plan ohnehin als Deload beschriftet und die Begründung auf
- * dem Heute-Screen sagt es ebenfalls. Im Titel würde der Zusatz nur die Zeile
- * sprengen und in der Liste abgeschnitten werden.
- */
-function sessionTitle(type: SessionTypeKey): string {
-  return SESSION_TYPES[type].label;
-}
+/** Untergrenze, unter die keine Einheit gekürzt wird — darunter lohnt sie nicht. */
+const MIN_SESSION_MIN = 20;
 
 /* ------------------------------------------------------------------ */
-/* Bedarf pro Zyklus                                                   */
+/* Eingaben                                                            */
 /* ------------------------------------------------------------------ */
 
-/**
- * Übertrag zwischen den Zyklen.
- *
- * Die Wochenziele sind auf 7 Tage bezogen, ein Zyklus dauert aber 5. Ohne
- * Übertrag würde jedes Mal abgerundet und das Volumen dauerhaft zu niedrig
- * ausfallen. Mit Übertrag kommen mal 2, mal 3 Krafteinheiten in den Zyklus —
- * im Schnitt genau die gewünschten 3 pro Woche.
- */
-export interface PlanState {
-  carry: { strength: number; run: number; optional: number };
-  /** Welche harte Laufeinheit als Nächstes dran ist. */
-  nextRunKey: 'run_intervals' | 'run_long';
-  /** Welcher Kraft-Split als Nächstes dran ist. */
-  nextSplit: 'strength_lower' | 'strength_upper';
-  /** Erreichte Stufe je Einheitsart, während der Planung fortgeschrieben. */
-  levels: ProgressionLevels;
-}
-
-export function initialPlanState(base: ProgressionLevels = {}): PlanState {
-  return {
-    // Ein halber Übertrag zum Start lässt den ersten — meist angebrochenen —
-    // Zyklus zur nächsten ganzen Zahl runden statt abzuschneiden. Über die
-    // folgenden Zyklen gleicht sich das von selbst wieder aus.
-    carry: { strength: 0.5, run: 0.5, optional: 0.5 },
-    nextRunKey: 'run_intervals',
-    nextSplit: 'strength_lower',
-    levels: { ...base },
-  };
-}
-
-function takeDemand(carry: number, weeklyTarget: number, lengthDays: number): [number, number] {
-  const raw = carry + (weeklyTarget * lengthDays) / 7;
-  const count = Math.floor(raw + 1e-9);
-  return [count, raw - count];
-}
-
-/** Ein einzuplanender Wunsch mit Ausweichtyp, falls kein passender Tag frei ist. */
-interface Candidate {
-  primary: SessionTypeKey;
-  fallbacks: SessionTypeKey[];
-  /** Kleiner ist wichtiger. */
-  priority: number;
-}
-
-function buildCandidates(
-  state: PlanState,
-  targets: WeeklyTargets,
-  lengthDays: number,
-  profile: PlanningProfile,
-  isDeload: boolean,
-  allowStrengthOnLightDays: boolean,
-  cycleIndex: number,
-): { candidates: Candidate[]; state: PlanState } {
-  const [runCount, runCarry] = takeDemand(state.carry.run, targets.run, lengthDays);
-  const [strengthCount, strengthCarry] = takeDemand(state.carry.strength, targets.strength, lengthDays);
-  const [optionalCount, optionalCarry] = takeDemand(state.carry.optional, targets.optional, lengthDays);
-
-  let nextRunKey = state.nextRunKey;
-  let nextSplit = state.nextSplit;
-
-  // Im Deload gibt es keine harten Einheiten — nur Volumen auf niedriger Intensität.
-  const runs: Candidate[] = [];
-  for (let i = 0; i < runCount; i++) {
-    if (isDeload || i > 0) {
-      runs.push({ primary: 'run_easy', fallbacks: ['run_recovery'], priority: 0 });
-    } else {
-      runs.push({ primary: nextRunKey, fallbacks: ['run_easy', 'run_recovery'], priority: 0 });
-      nextRunKey = nextRunKey === 'run_intervals' ? 'run_long' : 'run_intervals';
-    }
-  }
-
-  const strengthFallbacks = allowStrengthOnLightDays ? ['strength_short' as SessionTypeKey] : [];
-  const strength: Candidate[] = [];
-  for (let i = 0; i < strengthCount; i++) {
-    if (isDeload) {
-      strength.push({ primary: 'strength_full', fallbacks: strengthFallbacks, priority: 0 });
-    } else {
-      strength.push({
-        primary: nextSplit,
-        fallbacks: [
-          // Unterkörper braucht einen vollen Tag; ist keiner frei, wird es Oberkörper.
-          ...(nextSplit === 'strength_lower' ? (['strength_upper'] as SessionTypeKey[]) : []),
-          'strength_full' as SessionTypeKey,
-          ...strengthFallbacks,
-        ],
-        priority: 0,
-      });
-      nextSplit = nextSplit === 'strength_lower' ? 'strength_upper' : 'strength_lower';
-    }
-  }
-
-  const optional: Candidate[] = [];
-  for (let i = 0; i < optionalCount; i++) {
-    optional.push({ primary: 'run_recovery', fallbacks: ['mobility'], priority: 2 });
-  }
-
-  // Das Profil entscheidet, wer die knappen vollen Tage zuerst bekommt.
-  const runFirst =
-    profile === 'runFirst' || (profile === 'balanced' && cycleIndex % 2 === 0);
-  runs.forEach((c) => (c.priority = runFirst ? 0 : 1));
-  strength.forEach((c) => (c.priority = runFirst ? 1 : 0));
-
-  // Sortierung: erst der Anspruch an den Tag, dann das Profil.
-  //
-  // Ohne den ersten Schlüssel könnte ein lockerer Lauf den einzigen Schlaftag
-  // belegen, bevor die Krafteinheit überhaupt geprüft wird — die knappen guten
-  // Tage müssen zuerst an das gehen, was sie wirklich braucht.
-  const candidates = [...runs, ...strength, ...optional].sort((a, b) => {
-    const demand =
-      CAPACITY_RANK[SESSION_TYPES[b.primary].minCapacity] -
-      CAPACITY_RANK[SESSION_TYPES[a.primary].minCapacity];
-    if (demand !== 0) return demand;
-    return a.priority - b.priority;
-  });
-
-  return {
-    candidates,
-    state: {
-      carry: { run: runCarry, strength: strengthCarry, optional: optionalCarry },
-      nextRunKey,
-      nextSplit,
-      // Die Stufen fasst der Kandidatenbau nicht an; hochgezählt wird erst,
-      // wenn eine Einheit tatsächlich einen Tag bekommen hat.
-      levels: state.levels,
-    },
-  };
-}
-
-/* ------------------------------------------------------------------ */
-/* Platzierung                                                         */
-/* ------------------------------------------------------------------ */
-
-/** Ein Tag kann eine Einheit tragen — an einem Doppeltag ausnahmsweise zwei. */
-interface DaySlot {
-  day: ResolvedShiftDay;
-  assigned: SessionTypeKey[];
+export interface PlanInput {
+  startDate: IsoDate;
+  ctx: ShiftContext;
+  settings: Settings;
+  /** Wie viele Kalenderwochen im Voraus geplant werden. */
+  weeks: number;
+  name?: string;
+  /** Bereits erreichte Stufen. Ohne Angabe startet jede Einheitsart bei 0. */
+  progressionBase?: ProgressionLevels;
   /**
-   * Nur Kontext, nicht belegbar. Der letzte Tag des vorherigen Zyklus wird so
-   * mitgeführt, damit die Regeln über die Zyklusgrenze hinweg greifen — sonst
-   * könnte direkt nach einem harten Tag am Zyklusende der nächste folgen.
+   * Was an welchem Tag schon erledigt oder fixiert ist. Diese Tage bekommen
+   * nichts Neues, zählen aber für alle Regeln mit — wer gestern hart gelaufen
+   * ist, bekommt heute nichts Hartes, auch wenn der alte Plan ersetzt wurde.
    */
-  readonly frozen: boolean;
-}
-
-function isHard(type: SessionTypeKey): boolean {
-  return SESSION_TYPES[type].countsAsHardDay;
-}
-
-function dayIsHard(slot: DaySlot | undefined): boolean {
-  return slot !== undefined && slot.assigned.some(isHard);
-}
-
-/** Würde dieser Typ an dieser Stelle einen zu langen harten Block erzeugen? */
-function hardBlockOk(slots: DaySlot[], index: number, type: SessionTypeKey): boolean {
-  if (!isHard(type)) return true;
-
-  let run = 1;
-  for (let i = index - 1; i >= 0 && dayIsHard(slots[i]); i--) run++;
-  for (let i = index + 1; i < slots.length && dayIsHard(slots[i]); i++) run++;
-  return run <= MAX_CONSECUTIVE_HARD_DAYS;
-}
-
-/**
- * Dieselbe Einheit darf nicht an zwei aufeinanderfolgenden Tagen liegen.
- *
- * Die Regel gegen harte Tage in Folge greift hier nicht: zwei schwere
- * Beineinheiten hintereinander sind auch dann falsch, wenn sie formal erlaubt
- * wären, weil dieselbe Muskulatur keine 24 Stunden Erholung bekommt.
- */
-function sameTypeAdjacent(slots: DaySlot[], index: number, type: SessionTypeKey): boolean {
-  return (
-    (index > 0 && slots[index - 1].assigned.includes(type)) ||
-    (index < slots.length - 1 && slots[index + 1].assigned.includes(type))
-  );
-}
-
-/** Erster passender freier Tag für diesen Typ, nach Best-Fit sortiert. */
-function findSlot(slots: DaySlot[], type: SessionTypeKey, preferHigher: boolean): number | null {
-  const eligible = slots
-    .map((slot, index) => ({ slot, index }))
-    .filter(
-      ({ slot, index }) =>
-        !slot.frozen &&
-        slot.assigned.length === 0 &&
-        capacityAllows(slot.day.capacity, type) &&
-        !sameTypeAdjacent(slots, index, type) &&
-        hardBlockOk(slots, index, type),
-    )
-    .sort((a, b) => {
-      const ra = CAPACITY_RANK[a.slot.day.capacity];
-      const rb = CAPACITY_RANK[b.slot.day.capacity];
-      if (ra !== rb) return preferHigher ? rb - ra : ra - rb;
-      return a.slot.day.date.localeCompare(b.slot.day.date);
-    });
-
-  return eligible.length > 0 ? eligible[0].index : null;
-}
-
-/**
- * Sucht einen Doppeltag: ein freier Tag, auf dem bereits genau eine Einheit der
- * **anderen** Disziplin liegt.
- *
- * Ausdrücklich nur als Ausweg gedacht — zwei Einheiten an einem Tag sind die
- * Ausnahme, nicht der Normalfall. Deshalb höchstens einer pro Zyklus, nur an
- * Tagen voller Kapazität und nie zweimal Laufen oder zweimal Kraft.
- */
-function findDoubleSlot(slots: DaySlot[], type: SessionTypeKey): number | null {
-  const meta = SESSION_TYPES[type];
-  if (meta.discipline === 'mobility') return null;
-
-  const candidates = slots
-    .map((slot, index) => ({ slot, index }))
-    .filter(({ slot, index }) => {
-      if (slot.frozen) return false;
-      if (slot.day.capacity !== 'full') return false;
-      if (slot.assigned.length !== 1) return false;
-      if (!capacityAllows(slot.day.capacity, type)) return false;
-
-      const existing = SESSION_TYPES[slot.assigned[0]];
-      // Eine Kraft- und eine Laufeinheit — nie zwei gleiche Disziplinen.
-      if (existing.discipline === meta.discipline) return false;
-      if (existing.discipline === 'mobility') return false;
-
-      return !sameTypeAdjacent(slots, index, type) && hardBlockOk(slots, index, type);
-    })
-    .sort((a, b) => a.slot.day.date.localeCompare(b.slot.day.date));
-
-  return candidates.length > 0 ? candidates[0].index : null;
-}
-
-export interface PlacementResult {
-  slots: DaySlot[];
-  /** Wünsche, für die kein Tag gefunden wurde. */
-  unplaced: SessionTypeKey[];
-  /** Datum des Doppeltags, falls einer gebraucht wurde. */
-  doubleDay: IsoDate | null;
-}
-
-/** Was tatsächlich platziert wurde — nötig, um später aufwerten zu können. */
-interface Assignment {
-  candidate: Candidate;
-  slotIndex: number;
-  type: SessionTypeKey;
-}
-
-/**
- * Verteilt die Wünsche auf die Tage des Zyklus.
- *
- * Drei Durchgänge:
- *
- * 1. **Best-Fit** — unter den möglichen Tagen gewinnt der mit der niedrigsten
- *    ausreichenden Kapazität. So bleiben die vollen Tage für das frei, was sie
- *    wirklich braucht.
- * 2. **Aufwerten** — musste ein Wunsch auf einen Ersatztyp ausweichen (etwa
- *    "Kraft kurz" statt "Kraft Unterkörper") und ist danach doch noch ein
- *    besserer Tag frei geblieben, zieht die Session dorthin um und bekommt ihre
- *    volle Form zurück.
- * 3. **Doppeltag** — bleibt danach noch etwas übrig oder steckt in einer
- *    verkürzten Form fest, darf einmal pro Zyklus ein freier Tag zwei Einheiten
- *    tragen: eine Kraft- und eine Laufeinheit.
- */
-export function placeCandidates(
-  days: ResolvedShiftDay[],
-  candidates: Candidate[],
-  allowDoubleDay: boolean,
-  /** Vortag mit dem, was dort liegt — nur als Kontext für die Nachbarregeln. */
-  previousDay?: { day: ResolvedShiftDay; assigned: SessionTypeKey[] },
+  completed?: Array<{ date: IsoDate; type: SessionTypeKey }>;
+  /** Schlaf und Erholung je Tag. Fehlende Tage: siehe readiness.plannedRecovery. */
+  readiness?: Map<IsoDate, DayReadiness>;
+  /** Der heutige Tag. Trennt "noch planbar" von "war so". Nur für Tests gesetzt. */
+  todayIso?: IsoDate;
+  /** Letzter Tag, für den überhaupt geplant wird. */
+  until?: IsoDate;
   /**
-   * Tage, an denen schon trainiert wurde. Sie bekommen nichts Neues, zählen
-   * für die Nachbarregeln aber mit — wer gestern Intervalle gelaufen ist, soll
-   * heute keine bekommen, nur weil der alte Plan ersetzt wurde.
+   * Harte Einheiten **vor** dem Startdatum. Ohne sie fiele der erste geplante
+   * Tag unter Umständen direkt hinter zwei harte Tage — die Regel gegen drei
+   * harte Tage in Folge muss über die Plangrenze hinweg greifen.
    */
-  occupied?: Map<IsoDate, SessionTypeKey[]>,
-): PlacementResult {
-  const slots: DaySlot[] = [
-    ...(previousDay
-      ? [{ day: previousDay.day, assigned: previousDay.assigned, frozen: true }]
-      : []),
-    ...days.map((day) => {
-      const done = occupied?.get(day.date);
-      return done
-        ? { day, assigned: [...done], frozen: true }
-        : { day, assigned: [] as SessionTypeKey[], frozen: false };
-    }),
-  ];
-  const unplaced: SessionTypeKey[] = [];
-  const assignments: Assignment[] = [];
-
-  // Durchgang 1: Best-Fit in Prioritätsreihenfolge.
-  for (const candidate of candidates) {
-    const options = [candidate.primary, ...candidate.fallbacks];
-    let placed = false;
-
-    for (const type of options) {
-      const index = findSlot(slots, type, false);
-      if (index !== null) {
-        slots[index].assigned.push(type);
-        assignments.push({ candidate, slotIndex: index, type });
-        placed = true;
-        break;
-      }
-    }
-
-    if (!placed) unplaced.push(candidate.primary);
-  }
-
-  // Durchgang 2: Ersatztypen aufwerten, solange bessere Tage frei sind.
-  for (const assignment of assignments) {
-    const options = [assignment.candidate.primary, ...assignment.candidate.fallbacks];
-    const usedRank = options.indexOf(assignment.type);
-    if (usedRank <= 0) continue; // Wunschtyp bekommen, nichts aufzuwerten.
-
-    const currentCapacity = CAPACITY_RANK[slots[assignment.slotIndex].day.capacity];
-
-    for (let rank = 0; rank < usedRank; rank++) {
-      const better = options[rank];
-
-      // Tag vorübergehend freigeben, damit die Blockprüfung nicht die eigene
-      // Session mitzählt.
-      const held = slots[assignment.slotIndex].assigned;
-      slots[assignment.slotIndex].assigned = held.filter((t) => t !== assignment.type);
-      const target = findSlot(slots, better, true);
-
-      if (target !== null && CAPACITY_RANK[slots[target].day.capacity] > currentCapacity) {
-        slots[target].assigned.push(better);
-        assignment.slotIndex = target;
-        assignment.type = better;
-        break;
-      }
-
-      slots[assignment.slotIndex].assigned = held;
-    }
-  }
-
-  // Durchgang 3: Doppeltag als letzter Ausweg.
-  let doubleDay: IsoDate | null = null;
-  if (allowDoubleDay) {
-    // Erst das, was gar keinen Platz gefunden hat.
-    for (let i = unplaced.length - 1; i >= 0 && doubleDay === null; i--) {
-      const index = findDoubleSlot(slots, unplaced[i]);
-      if (index !== null) {
-        slots[index].assigned.push(unplaced[i]);
-        doubleDay = slots[index].day.date;
-        unplaced.splice(i, 1);
-      }
-    }
-
-    // Dann das, was nur in verkürzter Form untergekommen ist.
-    for (const assignment of assignments) {
-      if (doubleDay !== null) break;
-      if (assignment.type === assignment.candidate.primary) continue;
-
-      const index = findDoubleSlot(slots, assignment.candidate.primary);
-      if (index === null) continue;
-
-      const from = slots[assignment.slotIndex];
-      from.assigned = from.assigned.filter((t) => t !== assignment.type);
-      slots[index].assigned.push(assignment.candidate.primary);
-      assignment.slotIndex = index;
-      assignment.type = assignment.candidate.primary;
-      doubleDay = slots[index].day.date;
-    }
-  }
-
-  return { slots: slots.filter((slot) => !slot.frozen), unplaced, doubleDay };
+  history?: Array<{ date: IsoDate; type: SessionTypeKey }>;
 }
-
-/* ------------------------------------------------------------------ */
-/* Plan erzeugen                                                       */
-/* ------------------------------------------------------------------ */
 
 export interface GeneratedPlan {
   macrocycle: Macrocycle;
   mesocycles: Mesocycle[];
   microcycles: Microcycle[];
   sessions: Session[];
-  /** Wünsche, die in keinem Zyklus untergebracht werden konnten. */
-  unplaced: Array<{ cycleStart: IsoDate; type: SessionTypeKey }>;
-  /** Tage, an denen ausnahmsweise zwei Einheiten liegen. */
-  doubleDays: IsoDate[];
-  /** Stufenstand, auf dem dieser Plan aufsetzt. Leer heißt: von null. */
+  /** Tage, an denen die Regeln nichts zugelassen haben, mit Begründung. */
+  restDays: Array<{ date: IsoDate; reason: string }>;
+  /** Wochenziele, die nicht erreicht wurden — die Schicht gab sie nicht her. */
+  shortfalls: Array<{ weekStart: IsoDate; missing: string }>;
   progressionBase: ProgressionLevels;
 }
+
+/* ------------------------------------------------------------------ */
+/* Fingerabdruck                                                       */
+/* ------------------------------------------------------------------ */
 
 /**
  * Fingerabdruck aller Eingaben, aus denen ein Plan entsteht.
  *
- * Ändert sich davon etwas — eine Schicht, die Rotation, ein Wochenziel —, dann
- * beschreibt der bestehende Plan eine Woche, die es nicht mehr gibt. Statt das
- * dem Nutzer aufzubürden ("denk dran, neu zu erzeugen"), vergleicht die App
- * beide Fingerabdrücke und passt den Plan selbst an.
- *
- * Bewusst nur die **Eingaben**, nicht das Ergebnis: Was man abhakt, verschiebt
- * oder streicht, ist keine Änderung der Grundlage und löst nichts aus.
+ * Ändert sich davon etwas — eine Schicht, ein Erholungseintrag, ein Ziel —,
+ * dann beschreibt der bestehende Plan einen Tag, den es nicht mehr gibt, und
+ * die App passt ihn selbst an. Bewusst nur die **Eingaben**: Was man abhakt
+ * oder verschiebt, ist keine Änderung der Grundlage.
  */
 export function planFingerprint(
   ctx: ShiftContext,
   settings: Settings,
   from: IsoDate,
+  readiness?: Map<IsoDate, DayReadiness>,
 ): string {
   const rotation = ctx.pattern
     ? `${ctx.pattern.anchorDate}|${ctx.pattern.sequence.join(',')}`
     : 'keine';
 
-  // Kapazität und Abwesenheitsmarke entscheiden über die Planung; Name und
-  // Farbe nicht — eine Umbenennung soll den Plan nicht anfassen.
+  // Art und Abwesenheitsmarke entscheiden über die Planung; Name und Farbe
+  // nicht — eine Umbenennung soll den Plan nicht anfassen.
   const types = [...ctx.shiftTypes]
     .sort((a, b) => a.id.localeCompare(b.id))
-    .map((t) => `${t.id}:${t.capacity}:${t.cancelsPlanned ? 'x' : '-'}`)
+    .map((t) => `${t.id}:${t.kind ?? t.capacity}:${t.cancelsPlanned ? 'x' : '-'}`)
     .join(',');
 
-  // Bewusst ohne obere Grenze: trägt man Schichten für den nächsten Monat ein,
-  // muss sich das auf den Plan auswirken — auch wenn er heute dort noch gar
-  // nicht hinreicht.
   const overrides = ctx.overrides
     .filter((o) => o.date >= from)
     .sort((a, b) => a.date.localeCompare(b.date))
     .map((o) => `${o.date}:${o.shiftTypeId}`)
     .join(',');
 
-  // Die Zonen stehen im Text jeder Einheit ("Zone 2 · 139–160 bpm". Ändert man
-  // sie, stimmt der Plan nicht mehr mit den Einstellungen überein.
-  const zones = settings.hrZones
-    .map((z) => `${z.zone}:${z.minBpm}-${z.maxBpm}`)
-    .join(',');
+  // Die Erholung gehört genauso dazu: Trägt man für morgen "niedrig" ein, darf
+  // dort morgen keine harte Einheit mehr stehen, ohne dass man etwas drückt.
+  const rest = readiness
+    ? [...readiness.values()]
+        .filter((r) => r.date >= from)
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .map((r) => `${r.date}:${r.recovery}:${r.sleepDebt}:${r.sleepHours ?? '-'}`)
+        .join(',')
+    : '';
 
-  const targets = settings.weeklyTargets;
+  const zones = settings.hrZones.map((z) => `${z.zone}:${z.minBpm}-${z.maxBpm}`).join(',');
+
+  const t = settings.weeklyTargets;
   const rules = [
-    targets.strength,
-    targets.run,
-    targets.optional,
-    settings.planningProfile,
-    settings.allowStrengthOnLightDays ? 'k+' : 'k-',
-    settings.allowDoubleDayPerCycle ? 'd+' : 'd-',
+    t.strength,
+    t.run,
+    t.optional,
+    t.maxHardPerWeek,
+    t.strengthHard,
+    settings.maxConsecutiveHardDays,
+    settings.weeklyVolumeGrowthPct,
     settings.mesoLoadCycles,
     settings.mesoDeloadCycles,
   ].join('|');
 
-  return `1;${rotation};${types};${overrides};${rules};${zones}`;
+  return `2;${rotation};${types};${overrides};${rest};${rules};${zones}`;
 }
 
-export interface PlanInput {
-  startDate: IsoDate;
-  ctx: ShiftContext;
-  settings: Settings;
-  /** Wie viele Mesozyklen im Voraus erzeugt werden. */
-  mesocycleCount: number;
-  name?: string;
-  /**
-   * Bereits erreichte Stufen. Ohne Angabe startet jede Einheitsart bei 0 —
-   * der erste Plan fängt also tatsächlich bei null an.
-   */
-  progressionBase?: ProgressionLevels;
-  /**
-   * Was an welchem Tag schon erledigt ist.
-   *
-   * Beim Neuerzeugen bleiben protokollierte Einheiten stehen — sie sind
-   * Verlauf. Ohne diese Liste legte der neue Plan auf denselben Tag noch eine
-   * zweite Einheit, und der Heute-Screen zeigte beide.
-   */
-  completed?: Array<{ date: IsoDate; type: SessionTypeKey }>;
-  /**
-   * Letzter Tag, für den überhaupt geplant wird.
-   *
-   * Ohne Rotation weiß die App nur so weit Bescheid, wie der Schichtplan
-   * eingetragen ist. Danach weiterzuplanen hieße, auf leere Tage zu raten —
-   * der Plan reicht so weit wie das Wissen, keinen Tag weiter.
-   */
-  until?: IsoDate;
+/* ------------------------------------------------------------------ */
+/* Historie: harte Tage                                                */
+/* ------------------------------------------------------------------ */
+
+/** Führt mit, an welchen Tagen hart trainiert wurde — geplant wie erledigt. */
+class HardDays {
+  private readonly days = new Set<IsoDate>();
+
+  constructor(entries: Array<{ date: IsoDate; type: SessionTypeKey }> = []) {
+    for (const e of entries) this.add(e.date, e.type);
+  }
+
+  add(date: IsoDate, type: SessionTypeKey): void {
+    if (SESSION_TYPES[type]?.countsAsHardDay) this.days.add(date);
+  }
+
+  /** Harte Tage in den sieben Tagen vor diesem Datum. */
+  last7(date: IsoDate): number {
+    let count = 0;
+    for (let i = 1; i <= 7; i++) if (this.days.has(addDays(date, -i))) count++;
+    return count;
+  }
+
+  /** Wie viele harte Tage unmittelbar vor diesem Datum liegen. */
+  streakBefore(date: IsoDate): number {
+    let count = 0;
+    let cursor = addDays(date, -1);
+    while (this.days.has(cursor)) {
+      count++;
+      cursor = addDays(cursor, -1);
+    }
+    return count;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Wochen                                                              */
+/* ------------------------------------------------------------------ */
+
+interface WeekSpan {
+  start: IsoDate;
+  end: IsoDate;
+  /** Fortlaufender Index über den ganzen Plan, 0-basiert. */
+  index: number;
+  isDeload: boolean;
+  /** Index des Mesozyklus, 0-basiert. */
+  mesoIndex: number;
 }
 
 /**
- * Grenzen des Rotationszyklus, in dem dieses Datum liegt.
- * Ohne aktive Rotation wird ersatzweise mit sieben Tagen gerechnet.
+ * Zerlegt den Zeitraum in Kalenderwochen.
+ *
+ * Die erste Woche ist fast immer angebrochen — geplant wird ab heute, nicht ab
+ * dem letzten Montag. Sie bekommt trotzdem die vollen Wochenziele anteilig,
+ * sonst hätte jeder neue Plan eine leere Anfangswoche.
  */
-export function cycleBoundsFor(date: IsoDate, ctx: ShiftContext): { start: IsoDate; length: number } {
-  const pattern = ctx.pattern;
-  if (!pattern || pattern.sequence.length === 0) {
-    return { start: date, length: 7 };
+function weekSpans(from: IsoDate, to: IsoDate, settings: Settings): WeekSpan[] {
+  const perMeso = Math.max(1, settings.mesoLoadCycles + settings.mesoDeloadCycles);
+  const spans: WeekSpan[] = [];
+  let cursor = from;
+  let index = 0;
+
+  while (cursor <= to) {
+    const end = minDate(addDays(startOfWeek(cursor), 6), to);
+    const inMeso = index % perMeso;
+    spans.push({
+      start: cursor,
+      end,
+      index,
+      isDeload: inMeso >= settings.mesoLoadCycles,
+      mesoIndex: Math.floor(index / perMeso),
+    });
+    cursor = addDays(end, 1);
+    index++;
   }
-  const length = pattern.sequence.length;
-  const offset = mod(daysBetween(pattern.anchorDate, date), length);
-  return { start: addDays(date, -offset), length };
+  return spans;
 }
 
-export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
-  const { startDate, ctx, settings, mesocycleCount } = input;
-  const ts = now();
+function minDate(a: IsoDate, b: IsoDate): IsoDate {
+  return a < b ? a : b;
+}
 
-  const { length: cycleLength } = cycleBoundsFor(startDate, ctx);
-  const cyclesPerMeso = settings.mesoLoadCycles + settings.mesoDeloadCycles;
-  const totalCycles = cyclesPerMeso * mesocycleCount;
+/**
+ * Anteilige Wochenziele für eine angebrochene Woche.
+ *
+ * Eine Woche, die am Freitag beginnt, kann keine drei Krafteinheiten tragen.
+ * Ohne diese Kürzung stünde in der ersten Woche jedes neuen Plans ein Ziel,
+ * das nie erreichbar war — und die App meldete jede Woche ein Defizit, das
+ * keines ist.
+ */
+function scaledTargets(settings: Settings, days: number): Settings['weeklyTargets'] {
+  const t = settings.weeklyTargets;
+  if (days >= 7) return t;
+  const f = days / 7;
+  const scale = (n: number) => Math.max(0, Math.round(n * f));
+  return {
+    strength: scale(t.strength),
+    run: scale(t.run),
+    optional: scale(t.optional),
+    // Die Obergrenze wird ebenfalls anteilig gezogen, sonst passten in drei
+    // Resttage drei harte Einheiten.
+    maxHardPerWeek: Math.max(1, scale(t.maxHardPerWeek)),
+    strengthHard: scale(t.strengthHard),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Plan erzeugen                                                       */
+/* ------------------------------------------------------------------ */
+
+export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
+  const { startDate, ctx, settings } = input;
+  const ts = now();
+  const readiness = input.readiness ?? new Map<IsoDate, DayReadiness>();
+  const maxStreak = Math.max(1, settings.maxConsecutiveHardDays ?? 2);
+  const todayIso = input.todayIso ?? today();
+
+  const lastDay = input.until ?? addDays(startDate, Math.max(1, input.weeks) * 7 - 1);
+  const spans = lastDay >= startDate ? weekSpans(startDate, lastDay, settings) : [];
+
+  // Was an welchem Tag schon liegt — bleibt stehen, zählt aber für alle Regeln.
+  const occupied = new Map<IsoDate, SessionTypeKey[]>();
+  for (const done of input.completed ?? []) {
+    occupied.set(done.date, [...(occupied.get(done.date) ?? []), done.type]);
+  }
+
+  const hard = new HardDays([...(input.history ?? []), ...(input.completed ?? [])]);
 
   const macrocycle: Macrocycle = {
     id: newId('macro'),
     name: input.name ?? 'Ganzjährig',
     goalKind: 'yearRound',
     startDate,
-    endDate: addDays(startDate, totalCycles * cycleLength - 1),
+    endDate: spans.length > 0 ? spans[spans.length - 1].end : startDate,
     targetEventName: null,
     targetEventDate: null,
     active: true,
-    inputFingerprint: '',
+    inputFingerprint: planFingerprint(ctx, settings, startDate, readiness),
     createdAt: ts,
     updatedAt: ts,
   };
@@ -570,189 +302,315 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
   const mesocycles: Mesocycle[] = [];
   const microcycles: Microcycle[] = [];
   const sessions: Session[] = [];
-  const unplaced: GeneratedPlan['unplaced'] = [];
-  const doubleDays: IsoDate[] = [];
+  const restDays: GeneratedPlan['restDays'] = [];
+  const shortfalls: GeneratedPlan['shortfalls'] = [];
 
-  // Tage, an denen schon etwas protokolliert ist, sind vergeben.
-  const occupied = new Map<IsoDate, SessionTypeKey[]>();
-  for (const done of input.completed ?? []) {
-    occupied.set(done.date, [...(occupied.get(done.date) ?? []), done.type]);
-  }
+  let levels: ProgressionLevels = { ...(input.progressionBase ?? {}) };
+  // Wechselt die harten Läufe durch. Startet dort, wo der Verlauf aufgehört hat.
+  let hardRunRotation = (input.history ?? []).filter(
+    (h) => SESSION_TYPES[h.type]?.discipline === 'run' && SESSION_TYPES[h.type]?.countsAsHardDay,
+  ).length;
+  // Bezugspunkt für die Steigerung: die letzte **volle Belastungswoche**.
+  // Eine angebrochene erste Woche oder eine Deload-Woche taugt nicht dafür —
+  // gegen sie gemessen sähe jede normale Woche wie ein Sprung aus.
+  let referenceMinutes = 0;
 
-  let state = initialPlanState(input.progressionBase ?? {});
-  // Der erste Zyklus beginnt heute und ist deshalb oft angebrochen.
-  let cursor = startDate;
-  let globalCycle = 0;
+  const mesoById = new Map<number, Mesocycle>();
 
-  for (let m = 0; m < mesocycleCount; m++) {
-    if (input.until && cursor > input.until) break;
-    const mesoStart = cursor;
-    const meso: Mesocycle = {
+  for (const span of spans) {
+    const days = resolveShiftRange(span.start, span.end, ctx);
+    const lengthDays = days.length;
+    const targets = scaledTargets(settings, lengthDays);
+    let ledger: WeekLedger = emptyLedger();
+    const weekSessions: Session[] = [];
+    const lowRecoveryDays: IsoDate[] = [];
+
+    for (const day of days) {
+      const row = readiness.get(day.date);
+      const recovery = plannedRecovery(day.date, row, todayIso);
+      if (recovery === 'low') lowRecoveryDays.push(day.date);
+
+      const dayCtx: DayContext = {
+        date: day.date,
+        shift: day,
+        recovery,
+        sleepHours: row?.sleepHours ?? null,
+        sleepDebt: sleepDebtOf(row),
+        hardLast7: hard.last7(day.date),
+        hardStreakBefore: hard.streakBefore(day.date),
+        hardThisWeek: ledger.hardRun + ledger.hardStrength,
+        isDeloadWeek: span.isDeload,
+      };
+
+      const allowance = dayAllowance(dayCtx, targets, maxStreak);
+
+      // Tage mit Erledigtem bekommen nichts Neues — sie zählen nur mit.
+      const already = occupied.get(day.date);
+      if (already && already.length > 0) {
+        for (const type of already) {
+          ledger = addToLedger(ledger, day.date, type);
+          hard.add(day.date, type);
+        }
+        continue;
+      }
+
+      const choice = chooseSession(allowance, ledger, targets, dayCtx, hardRunRotation);
+      if (!choice) {
+        restDays.push({ date: day.date, reason: restAdvice(dayCtx, allowance) });
+        continue;
+      }
+
+      const meta = SESSION_TYPES[choice.type];
+      const step = levelOf(levels, choice.type);
+      const form = sessionForm(choice.type, settings.hrZones, step, span.isDeload);
+
+      weekSessions.push({
+        id: newId('ses'),
+        microcycleId: '',
+        date: day.date,
+        orderInDay: 1,
+        discipline: meta.discipline,
+        type: choice.type,
+        intensity: meta.intensity,
+        title: meta.label,
+        plannedDurationMin: form.durationMin,
+        plannedDistanceKm: null,
+        zone: meta.defaultZone,
+        targetRpe: form.targetRpe,
+        isKey: meta.isKey && !span.isDeload,
+        load: Math.round(meta.load * (span.isDeload ? 0.6 : 1) * 10) / 10,
+        progressionStep: step,
+        progressionNote: form.note,
+        countsForProgression: !span.isDeload && progresses(choice.type),
+        content: form.content,
+        status: 'planned',
+        originalDate: null,
+        rescheduleReason: null,
+        planReason: reasonText(allowance, choice.why),
+        locked: false,
+        manuallyEdited: false,
+        createdAt: ts,
+        updatedAt: ts,
+      });
+
+      ledger = addToLedger(ledger, day.date, choice.type);
+      hard.add(day.date, choice.type);
+      if (meta.discipline === 'run' && meta.countsAsHardDay) hardRunRotation++;
+      // Die Stufe steigt nur außerhalb des Deloads: dort wird bewusst unter
+      // dem erreichten Stand trainiert, das ist kein Fortschritt.
+      if (!span.isDeload && progresses(choice.type)) {
+        levels = { ...levels, [choice.type]: step + 1 };
+      }
+    }
+
+    // Volumensteigerung begrenzen: höchstens der eingestellte Prozentsatz mehr
+    // als in der Vorwoche, und bei schlechter Erholung gar keine Steigerung.
+    const grown = capWeeklyVolume(
+      weekSessions,
+      referenceMinutes,
+      settings.weeklyVolumeGrowthPct ?? 8,
+      span.isDeload,
+      lowRecoveryDays.length >= 2,
+    );
+
+    const meso = mesoById.get(span.mesoIndex) ?? {
       id: newId('meso'),
       macrocycleId: macrocycle.id,
-      index: m + 1,
-      name: `Block ${m + 1}`,
-      startDate: mesoStart,
-      endDate: mesoStart,
+      index: span.mesoIndex + 1,
+      name: `Block ${span.mesoIndex + 1}`,
+      startDate: span.start,
+      endDate: span.end,
       loadCycles: settings.mesoLoadCycles,
       deloadCycles: settings.mesoDeloadCycles,
-      focus: 'maintain',
-      emphasis: settings.planningProfile === 'runFirst' ? 'run' : 'balanced',
-      status: m === 0 ? 'active' : 'planned',
+      focus: 'maintain' as const,
+      emphasis: 'balanced' as const,
+      status: span.mesoIndex === 0 ? ('active' as const) : ('planned' as const),
+      createdAt: ts,
+      updatedAt: ts,
+    };
+    meso.endDate = span.end;
+    if (!mesoById.has(span.mesoIndex)) {
+      mesoById.set(span.mesoIndex, meso);
+      mesocycles.push(meso);
+    }
+
+    const micro: Microcycle = {
+      id: newId('micro'),
+      mesocycleId: meso.id,
+      index: span.index + 1,
+      startDate: span.start,
+      endDate: span.end,
+      lengthDays,
+      plannedHard: ledger.hardRun + ledger.hardStrength,
+      plannedMinutes: grown.minutes,
+      isDeload: span.isDeload,
+      targetSessions: targets,
+      plannedLoad: Math.round(weekSessions.reduce((sum, s) => sum + s.load, 0) * 10) / 10,
+      progression: { ...levels },
       createdAt: ts,
       updatedAt: ts,
     };
 
-    for (let c = 0; c < cyclesPerMeso; c++) {
-      if (input.until && cursor > input.until) break;
-      const isDeload = c >= settings.mesoLoadCycles;
+    for (const session of weekSessions) session.microcycleId = micro.id;
+    microcycles.push(micro);
+    sessions.push(...weekSessions);
+    if (!span.isDeload && lengthDays >= 7) referenceMinutes = grown.minutes;
 
-      // Der allererste Zyklus beginnt heute und läuft bis zum Ende des laufenden
-      // Rotationsdurchlaufs — er ist also fast immer angebrochen.
-      //
-      // Bleibt davon nur ein kurzer Rest, wird der nächste volle Durchlauf
-      // angehängt statt einen Stummel-Zyklus anzulegen. Sonst stünde direkt nach
-      // dem Erzeugen ein leerer Zyklus da und ausgerechnet heute wäre nichts
-      // geplant, obwohl der Tag frei ist.
-      let cycleEnd: IsoDate;
-      if (globalCycle === 0) {
-        const bounds = cycleBoundsFor(cursor, ctx);
-        const restDays = daysBetween(cursor, addDays(bounds.start, bounds.length - 1)) + 1;
-        const tooShort = restDays < Math.ceil(cycleLength / 2);
-        cycleEnd = addDays(cursor, (tooShort ? restDays + cycleLength : restDays) - 1);
-      } else {
-        cycleEnd = addDays(cursor, cycleLength - 1);
-      }
-      if (input.until && cycleEnd > input.until) cycleEnd = input.until;
-      const lengthDays = daysBetween(cursor, cycleEnd) + 1;
-
-      const micro: Microcycle = {
-        id: newId('micro'),
-        mesocycleId: meso.id,
-        index: c + 1,
-        startDate: cursor,
-        endDate: cycleEnd,
-        lengthDays,
-        isDeload,
-        targetSessions: settings.weeklyTargets,
-        plannedLoad: 0,
-        progression: { ...state.levels },
-        createdAt: ts,
-        updatedAt: ts,
-      };
-
-      const days = resolveShiftRange(cursor, cycleEnd, ctx);
-      const previousDate = addDays(cursor, -1);
-      const previousDay = {
-        day: resolveShiftRange(previousDate, previousDate, ctx)[0],
-        assigned: [
-          ...sessions.filter((s) => s.date === previousDate).map((s) => s.type),
-          ...(occupied.get(previousDate) ?? []),
-        ],
-      };
-      const built = buildCandidates(
-        state,
-        settings.weeklyTargets,
-        lengthDays,
-        settings.planningProfile,
-        isDeload,
-        settings.allowStrengthOnLightDays,
-        globalCycle,
-      );
-      state = built.state;
-
-      const placement = placeCandidates(
-        days,
-        built.candidates,
-        settings.allowDoubleDayPerCycle && !isDeload,
-        previousDay,
-        occupied,
-      );
-      for (const type of placement.unplaced) {
-        unplaced.push({ cycleStart: cursor, type });
-      }
-      if (placement.doubleDay) doubleDays.push(placement.doubleDay);
-
-      // Nach Datum sortiert durchlaufen: die Stufe zählt chronologisch hoch,
-      // sonst bekäme der spätere Tag im Zyklus die niedrigere Stufe.
-      const slotsByDate = [...placement.slots].sort((a, b) =>
-        a.day.date.localeCompare(b.day.date),
-      );
-
-      for (const slot of slotsByDate) {
-        // An einem Doppeltag zuerst die Laufeinheit, dann Kraft: mit frischen
-        // Beinen läuft es sich besser, und die Kraft leidet weniger darunter.
-        const ordered = [...slot.assigned].sort(
-          (a, b) =>
-            (SESSION_TYPES[a].discipline === 'run' ? 0 : 1) -
-            (SESSION_TYPES[b].discipline === 'run' ? 0 : 1),
-        );
-
-        ordered.forEach((type, orderIndex) => {
-          const meta = SESSION_TYPES[type];
-          const deloadFactor = isDeload ? 0.6 : 1;
-          const step = levelOf(state.levels, type);
-          const form = sessionForm(type, settings.hrZones, step, isDeload);
-
-          // Erst planen, dann hochzählen: die nächste Einheit derselben Art
-          // liegt eine Stufe höher. Im Deload wird nicht gezählt — dort geht es
-          // ausdrücklich nicht um mehr, sondern um weniger.
-          if (!isDeload && progresses(type)) {
-            state = { ...state, levels: { ...state.levels, [type]: step + 1 } };
-          }
-
-          sessions.push({
-            id: newId('ses'),
-            microcycleId: micro.id,
-            date: slot.day.date,
-            orderInDay: orderIndex + 1,
-            discipline: meta.discipline,
-            type,
-            title: sessionTitle(type),
-            plannedDurationMin: form.durationMin,
-            plannedDistanceKm: null,
-            zone: meta.defaultZone,
-            targetRpe: form.targetRpe,
-            isKey: meta.isKey && !isDeload,
-            load: Math.round(meta.load * deloadFactor * 10) / 10,
-            progressionStep: step,
-            progressionNote: form.note,
-            countsForProgression: !isDeload && progresses(type),
-            content: form.content,
-            status: 'planned',
-            originalDate: null,
-            rescheduleReason: null,
-            locked: false,
-            manuallyEdited: false,
-            createdAt: ts,
-            updatedAt: ts,
-          });
-
-          micro.plannedLoad += Math.round(meta.load * deloadFactor * 10) / 10;
-        });
-      }
-
-      micro.plannedLoad = Math.round(micro.plannedLoad * 10) / 10;
-      microcycles.push(micro);
-
-      cursor = addDays(cycleEnd, 1);
-      globalCycle++;
-    }
-
-    meso.endDate = addDays(cursor, -1);
-    if (microcycles.some((m) => m.mesocycleId === meso.id)) mesocycles.push(meso);
+    const missing = describeShortfall(ledger, targets);
+    if (missing) shortfalls.push({ weekStart: span.start, missing });
   }
-
-  macrocycle.endDate = addDays(cursor, -1);
-  macrocycle.inputFingerprint = planFingerprint(ctx, settings, startDate);
 
   return {
     macrocycle,
     mesocycles,
     microcycles,
     sessions,
-    unplaced,
-    doubleDays,
+    restDays,
+    shortfalls,
     progressionBase: input.progressionBase ?? {},
   };
+}
+
+function reasonText(allowance: DayAllowance, why: string): string {
+  return [allowance.reason, why, ...allowance.limits].join(' ');
+}
+
+/**
+ * Hält die Wochensteigerung im Rahmen.
+ *
+ * Die Einheiten wachsen einzeln, jede nach ihrer eigenen Stufe. In Summe kann
+ * eine Woche dadurch einen Sprung machen, den keine der Einheiten für sich
+ * gerechtfertigt hätte — und genau daran gehen Läufer kaputt. Deshalb wird das
+ * Wochenvolumen gegen die Vorwoche geprüft und, wenn nötig, gekürzt.
+ *
+ * Gekürzt werden ausschließlich die **lockeren** Einheiten: Der harte Reiz ist
+ * der Sinn der Woche, das lockere Volumen ist die Stellschraube.
+ */
+function capWeeklyVolume(
+  weekSessions: Session[],
+  previousMinutes: number,
+  growthPct: number,
+  isDeload: boolean,
+  poorRecovery: boolean,
+): { minutes: number } {
+  const total = () => weekSessions.reduce((sum, s) => sum + (s.plannedDurationMin ?? 0), 0);
+  let minutes = total();
+
+  if (previousMinutes <= 0) return { minutes };
+
+  // Im Deload ist weniger die Absicht, nicht das Problem — nichts zu begrenzen.
+  if (isDeload) return { minutes };
+
+  // Bei schlechter Erholung wird das Volumen gehalten, nicht gesteigert.
+  const factor = poorRecovery ? 1 : 1 + Math.max(0, growthPct) / 100;
+  const ceiling = Math.round(previousMinutes * factor);
+  if (minutes <= ceiling) return { minutes };
+
+  // Erst die lockeren Einheiten kürzen, dann die mittleren. Harte nie: Sie sind
+  // der Reiz, um den die Woche gebaut ist — sie zu beschneiden hieße, das
+  // Training zu opfern statt das Volumen.
+  for (const level of ['easy', 'medium'] as const) {
+    const trimmable = weekSessions
+      .filter((s) => s.intensity === level && (s.plannedDurationMin ?? 0) > MIN_SESSION_MIN)
+      .sort((a, b) => (b.plannedDurationMin ?? 0) - (a.plannedDurationMin ?? 0));
+
+    for (const session of trimmable) {
+      if (minutes <= ceiling) break;
+      const current = session.plannedDurationMin ?? 0;
+      const cut = Math.min(current - MIN_SESSION_MIN, minutes - ceiling);
+      if (cut <= 0) continue;
+      session.plannedDurationMin = current - cut;
+      session.progressionNote =
+        `${session.progressionNote ?? ''} Gekürzt, damit die Woche nicht mehr als ${growthPct} % über der letzten Belastungswoche liegt.`.trim();
+      minutes -= cut;
+    }
+    if (minutes <= ceiling) break;
+  }
+
+  return { minutes: total() };
+}
+
+/** Ein Satz darüber, was der Woche zum Ziel fehlt — oder null, wenn nichts fehlt. */
+function describeShortfall(ledger: WeekLedger, targets: Settings['weeklyTargets']): string | null {
+  const parts: string[] = [];
+  const hardRunMissing = targets.run - ledger.hardRun;
+  const strengthMissing = targets.strength - ledger.hardStrength - ledger.mediumStrength;
+  if (hardRunMissing > 0) parts.push(`${hardRunMissing}× harte Ausdauer`);
+  if (strengthMissing > 0) parts.push(`${strengthMissing}× Kraft`);
+  return parts.length > 0 ? parts.join(', ') : null;
+}
+
+/**
+ * Grenzen der Kalenderwoche, in der dieses Datum liegt.
+ *
+ * Ersetzt das frühere `cycleBoundsFor`, das die Rotation abfragte. Es gibt
+ * keinen Rotationszyklus mehr, an dem etwas hinge — der Plan rechnet in Wochen.
+ */
+export function weekBoundsFor(date: IsoDate): { start: IsoDate; length: number } {
+  return { start: startOfWeek(date), length: 7 };
+}
+
+/**
+ * Was an einem einzelnen Tag gilt, ohne den ganzen Plan zu erzeugen.
+ *
+ * Für den Plan-Screen: Dort soll auch an einem Ruhetag stehen, *warum* er einer
+ * ist. Diese Antwort kommt aus demselben Regelwerk wie der Plan selbst — es
+ * gibt bewusst keine zweite, vereinfachte Erklärung daneben.
+ */
+export function explainDay(
+  day: ResolvedShiftDay,
+  readiness: DayReadiness | undefined,
+  settings: Settings,
+  hardBefore: { last7: number; streak: number; thisWeek: number },
+  isDeloadWeek: boolean,
+  todayIso: IsoDate = today(),
+): { ctx: DayContext; allowance: DayAllowance } {
+  const ctx: DayContext = {
+    date: day.date,
+    shift: day,
+    recovery: plannedRecovery(day.date, readiness, todayIso),
+    sleepHours: readiness?.sleepHours ?? null,
+    sleepDebt: sleepDebtOf(readiness),
+    hardLast7: hardBefore.last7,
+    hardStreakBefore: hardBefore.streak,
+    hardThisWeek: hardBefore.thisWeek,
+    isDeloadWeek,
+  };
+  return {
+    ctx,
+    allowance: dayAllowance(ctx, settings.weeklyTargets, Math.max(1, settings.maxConsecutiveHardDays ?? 2)),
+  };
+}
+
+/** Zählt harte Tage rund um ein Datum aus einer Liste von Einheiten. */
+export function hardContextFor(
+  date: IsoDate,
+  sessions: Array<{ date: IsoDate; type: SessionTypeKey; status: string }>,
+): { last7: number; streak: number; thisWeek: number } {
+  const days = new Set<IsoDate>();
+  for (const s of sessions) {
+    if (s.status === 'skipped' || s.status === 'missed') continue;
+    if (SESSION_TYPES[s.type]?.countsAsHardDay) days.add(s.date);
+  }
+
+  let last7 = 0;
+  for (let i = 1; i <= 7; i++) if (days.has(addDays(date, -i))) last7++;
+
+  let streak = 0;
+  let cursor = addDays(date, -1);
+  while (days.has(cursor)) {
+    streak++;
+    cursor = addDays(cursor, -1);
+  }
+
+  const weekStart = startOfWeek(date);
+  const thisWeek = dateRange(weekStart, addDays(date, -1)).filter((d) => days.has(d)).length;
+
+  return { last7, streak, thisWeek };
+}
+
+/** Wie viele Tage der Plan noch abdeckt. Für die Anzeige "geplant bis …". */
+export function planReach(macro: Macrocycle | undefined, from: IsoDate): number {
+  if (!macro?.endDate) return 0;
+  return Math.max(0, daysBetween(from, macro.endDate) + 1);
 }

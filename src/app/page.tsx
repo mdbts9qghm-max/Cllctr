@@ -28,6 +28,7 @@ import { CAPACITY_LABEL, TASK_ENERGY_LABEL, type Session, type Task , type Soul 
 import { Button, CapacityBadge, Card, Mark, Notice, Section } from '@/components/ui';
 import { NewRecordsNotice, SessionLogForm } from '@/components/SessionLogForm';
 import { SessionCard } from '@/components/SessionCard';
+import { DayCoach } from '@/components/DayCoach';
 
 /** Tage in der Vorschau "Als Nächstes". */
 const LOOKAHEAD_DAYS = 4;
@@ -44,9 +45,12 @@ export default function HeutePage() {
   const todayIso = today();
 
   const data = useLiveQuery(async () => {
+    // Acht Tage zurück statt einem: Die Regeln fragen nach den harten Tagen der
+    // letzten Woche, und ohne sie könnte heute ein dritter harter Tag in Folge
+    // stehen, ohne dass es jemandem auffällt.
     const sessions = await db.sessions
       .where('date')
-      .between(addDays(todayIso, -1), addDays(todayIso, LOOKAHEAD_DAYS), true, true)
+      .between(addDays(todayIso, -8), addDays(todayIso, LOOKAHEAD_DAYS), true, true)
       .toArray();
     // Einheiten aus den letzten zwei Wochen, die nie abgehakt wurden. Bei
     // Schichtarbeit trägt man auch mal zwei Tage später nach — ohne diese
@@ -175,6 +179,19 @@ export default function HeutePage() {
           <CapacityBadge capacity={day.capacity} label={CAPACITY_LABEL[day.capacity]} />
         </Link>
 
+        {/* Erholung, Regel und Ernährung des Tages. Steht hier oben, weil die
+            Erholung die Eingabe ist, von der alles Weitere abhängt — und weil
+            sie sonst nie eingetragen würde. */}
+        <div className="mb-4">
+          <DayCoach
+            day={day}
+            settings={settings}
+            sessions={todaySessions}
+            allSessions={data.sessions}
+            isDeloadWeek={micro?.isDeload ?? false}
+          />
+        </div>
+
         {message ? (
           <div className="mb-3">
             <Notice tone="ok">{message}</Notice>
@@ -279,7 +296,7 @@ export default function HeutePage() {
             <Link href="/plan" className="text-ember underline">
               Plan erzeugen
             </Link>{' '}
-            — die App baut ihn aus deiner Schichtrotation.
+            — die App baut ihn Tag für Tag aus Schicht und Erholung.
           </Notice>
         )}
 
@@ -444,7 +461,7 @@ export default function HeutePage() {
           <Card>
             <div className="mb-3 flex items-baseline justify-between">
               <p className="text-sm text-ink">
-                Zyklus {status.cycleIndex} von {status.cyclesPerMeso}
+                Woche {status.cycleIndex} von {status.cyclesPerMeso}
                 {status.isDeload ? ' · Deload' : ''}
               </p>
               <p className="text-xs text-ink-faint tabular">

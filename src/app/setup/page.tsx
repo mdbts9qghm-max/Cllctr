@@ -168,14 +168,16 @@ export default function SetupPage() {
 
       <Section
         title="Wochenziele"
-        hint="Anzahl Einheiten pro Woche — bewusst keine Wochentage. Wohin sie fallen, entscheidet der Schichtplan."
+        hint="Anzahl Einheiten pro Woche — bewusst keine Wochentage. Wohin sie fallen, entscheiden Schicht und Erholung."
       >
         <Card>
           <div className="grid grid-cols-3 gap-3">
             {(['strength', 'run', 'optional'] as const).map((key) => (
               <Field
                 key={key}
-                label={key === 'strength' ? 'Kraft' : key === 'run' ? 'Laufen' : 'Optional'}
+                label={
+                  key === 'strength' ? 'Kraft' : key === 'run' ? 'Harte Ausdauer' : 'Locker'
+                }
               >
                 <input
                   type="number"
@@ -197,8 +199,97 @@ export default function SetupPage() {
               </Field>
             ))}
           </div>
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <Field label="Davon Kraft schwer">
+              <input
+                type="number"
+                inputMode="numeric"
+                min={0}
+                max={4}
+                value={settings.weeklyTargets.strengthHard ?? 1}
+                onChange={(e) =>
+                  void db.settings.update('singleton', {
+                    weeklyTargets: {
+                      ...settings.weeklyTargets,
+                      strengthHard: Math.max(0, Math.min(4, Number(e.target.value) || 0)),
+                    },
+                    updatedAt: now(),
+                  })
+                }
+                className={`${inputClass} tabular`}
+              />
+            </Field>
+            <Field label="Harte Einheiten max.">
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={5}
+                value={settings.weeklyTargets.maxHardPerWeek ?? 3}
+                onChange={(e) =>
+                  void db.settings.update('singleton', {
+                    weeklyTargets: {
+                      ...settings.weeklyTargets,
+                      maxHardPerWeek: Math.max(1, Math.min(5, Number(e.target.value) || 1)),
+                    },
+                    updatedAt: now(),
+                  })
+                }
+                className={`${inputClass} tabular`}
+              />
+            </Field>
+          </div>
           <p className="mt-3 text-xs leading-relaxed text-ink-faint">
-            &quot;Optional&quot; ist der Puffer: diese Einheit fällt beim Umplanen als Erstes weg.
+            Die Obergrenze für harte Einheiten gilt für Laufen und Kraft zusammen und ist keine
+            Empfehlung, sondern eine Grenze: Was darüber läge, wird als mittlere oder lockere
+            Einheit geplant. &quot;Locker&quot; ist der Puffer und fällt beim Umplanen zuerst weg.
+          </p>
+        </Card>
+      </Section>
+
+      <Section
+        title="Belastungsregeln"
+        hint="Die beiden Zahlen, an denen die Steigerung hängt. Über ihnen steht immer die Erholung des Tages."
+      >
+        <Card>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Harte Tage in Folge max.">
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={3}
+                value={settings.maxConsecutiveHardDays ?? 2}
+                onChange={(e) =>
+                  void db.settings.update('singleton', {
+                    maxConsecutiveHardDays: Math.max(1, Math.min(3, Number(e.target.value) || 1)),
+                    updatedAt: now(),
+                  })
+                }
+                className={`${inputClass} tabular`}
+              />
+            </Field>
+            <Field label="Volumen pro Woche +%">
+              <input
+                type="number"
+                inputMode="numeric"
+                min={0}
+                max={15}
+                value={settings.weeklyVolumeGrowthPct ?? 8}
+                onChange={(e) =>
+                  void db.settings.update('singleton', {
+                    weeklyVolumeGrowthPct: Math.max(0, Math.min(15, Number(e.target.value) || 0)),
+                    updatedAt: now(),
+                  })
+                }
+                className={`${inputClass} tabular`}
+              />
+            </Field>
+          </div>
+          <p className="mt-3 text-xs leading-relaxed text-ink-faint">
+            5–10 % ist der brauchbare Bereich für die Wochensteigerung. Liegt die Erholung an
+            zwei Tagen der Woche niedrig, wird das Volumen gehalten statt gesteigert — und in
+            Deload-Wochen ohnehin heruntergefahren.
           </p>
         </Card>
       </Section>

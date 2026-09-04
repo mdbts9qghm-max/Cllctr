@@ -221,8 +221,10 @@ export default function SchichtPage() {
             Tage pro Woche, gemittelt über {feasibility.budget.days} Tage. Volle Tage schwanken
             zwischen {feasibility.budget.fullDaysPerWeek.min} und{' '}
             {feasibility.budget.fullDaysPerWeek.max} pro Woche. Ziel:{' '}
-            {settings.weeklyTargets.strength}× Kraft, {settings.weeklyTargets.run}× Laufen,{' '}
-            {settings.weeklyTargets.optional}× optional.
+            {settings.weeklyTargets.strength}× Kraft (davon{' '}
+            {settings.weeklyTargets.strengthHard ?? 1}× schwer),{' '}
+            {settings.weeklyTargets.run}× harte Ausdauer, {settings.weeklyTargets.optional}× locker
+            — höchstens {settings.weeklyTargets.maxHardPerWeek ?? 3} harte Einheiten pro Woche.
           </p>
         </Card>
 

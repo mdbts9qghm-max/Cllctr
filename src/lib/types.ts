@@ -12,7 +12,7 @@ export type IsoDate = string;
 export type IsoDateTime = string;
 
 /** Version des Schemas im Export. Wird bei jeder Änderung am Modell hochgezählt. */
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 /* ------------------------------------------------------------------ */
 /* Schicht                                                             */
@@ -47,6 +47,106 @@ export const CAPACITY_LABEL: Record<TrainingCapacity, string> = {
 };
 
 /**
+ * Welche der fünf Schichtarten das hier ist — unabhängig davon, wie sie heißt.
+ *
+ * Die Regeln hängen nicht am Namen und nicht an der Kapazität, sondern an der
+ * Art des Tages: eine V-Schicht erlaubt Laufen, aber kein Gym, obwohl sie
+ * zeitlich einer Tagschicht gleicht. Wer eine Schichtart umbenennt, ändert
+ * damit nicht, wie sie geplant wird — dafür ist diese Marke da.
+ */
+export type ShiftKind = 'day' | 'night' | 'sleep' | 'free' | 'variable' | 'off';
+
+export const SHIFT_KIND_LABEL: Record<ShiftKind, string> = {
+  day: 'Tagschicht',
+  night: 'Nachtschicht',
+  sleep: 'Schlaftag',
+  free: 'Freischicht',
+  variable: 'V-Schicht',
+  off: 'Kein Training',
+};
+
+/**
+ * Die drei Intensitäten. Der ganze Plan besteht aus nichts anderem:
+ * Die Schicht und die Erholung sagen, welche Intensität ein Tag verträgt,
+ * und erst danach wird entschieden, welche Einheit das konkret wird.
+ */
+export type Intensity = 'hard' | 'medium' | 'easy';
+
+export const INTENSITY_LABEL: Record<Intensity, string> = {
+  hard: 'Hart',
+  medium: 'Mittel',
+  easy: 'Locker',
+};
+
+export const INTENSITY_RANK: Record<Intensity, number> = {
+  easy: 1,
+  medium: 2,
+  hard: 3,
+};
+
+export const INTENSITY_RPE: Record<Intensity, string> = {
+  hard: 'RPE 8–10',
+  medium: 'RPE 6–7',
+  easy: 'RPE 3–5',
+};
+
+/* ------------------------------------------------------------------ */
+/* Erholung                                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Erholungszustand des Tages. Steht in der Priorität **über** der Schicht:
+ * Ein freier Tag mit schlechter Erholung ist kein harter Tag.
+ *
+ * Wird von Hand eingetragen — die App hat keinen Server und keinen Zugriff auf
+ * eine Uhr. Ohne Eintrag gilt `mid`: der Plan geht vom Normalfall aus, statt
+ * eine Zahl zu erfinden.
+ */
+export type Recovery = 'low' | 'mid' | 'high';
+
+export const RECOVERY_LABEL: Record<Recovery, string> = {
+  low: 'Niedrig',
+  mid: 'Mittel',
+  high: 'Hoch',
+};
+
+export const RECOVERY_SHORT: Record<Recovery, string> = {
+  low: 'niedrig',
+  mid: 'mittel',
+  high: 'hoch',
+};
+
+/** Grobe Schlafschuld der letzten Tage. */
+export type SleepDebt = 'none' | 'some' | 'high';
+
+export const SLEEP_DEBT_LABEL: Record<SleepDebt, string> = {
+  none: 'Keine',
+  some: 'Etwas',
+  high: 'Groß',
+};
+
+export const DEFAULT_RECOVERY: Recovery = 'mid';
+export const DEFAULT_SLEEP_DEBT: SleepDebt = 'none';
+
+/**
+ * Was an einem Tag über Schlaf und Erholung bekannt ist.
+ *
+ * Pro Tag höchstens ein Datensatz, Primärschlüssel ist das Datum. Fehlt er,
+ * gilt der Normalfall (`mid`, keine Schlafschuld) — der Plan wartet nicht auf
+ * eine Eingabe, er nimmt sie nur ernst, wenn sie da ist.
+ */
+export interface DayReadiness {
+  date: IsoDate;
+  recovery: Recovery;
+  /** Schlafdauer der letzten Nacht in Stunden, null wenn nicht eingetragen. */
+  sleepHours: number | null;
+  sleepDebt: SleepDebt;
+  note: string;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+}
+
+/**
  * Eine Schichtart. Die fünf Standardarten kommen aus dem Seed, du kannst
  * sie umbenennen, Zeiten ändern oder eigene ergänzen.
  */
@@ -62,6 +162,11 @@ export interface ShiftType {
   crossesMidnight: boolean;
   /** Wie viel Training an so einem Tag geht. Kern der Planungslogik. */
   capacity: TrainingCapacity;
+  /**
+   * Welche der fünf Schichtarten das ist. Bestimmt die Regeln — die Kapazität
+   * ist nur noch die grobe Kurzfassung davon für Anzeige und Filter.
+   */
+  kind: ShiftKind;
   /** Freitext, wann das Zeitfenster liegt — erscheint auf dem Heute-Screen. */
   trainingWindow: string | null;
   /** Tailwind-taugliche Hex-Farbe für die Kalenderansicht. */
@@ -138,43 +243,65 @@ export const DISCIPLINE_LABEL: Record<Discipline, string> = {
   mobility: 'Mobility',
 };
 
+/**
+ * Alle Einheitsarten, sortiert nach Disziplin und Intensität.
+ *
+ * Die alten Schlüssel bleiben bestehen, auch wo neuere sie fachlich ablösen:
+ * Sie stehen in erledigten Einheiten im Logbuch, und Verlauf wird nicht
+ * umgeschrieben.
+ */
 export type SessionTypeKey =
+  // Ausdauer hart
   | 'run_intervals'
+  | 'run_threshold'
   | 'run_tempo'
   | 'run_long'
+  // Ausdauer mittel
+  | 'run_long_easy'
+  | 'run_steady'
+  | 'run_progressive'
+  // Ausdauer locker
   | 'run_easy'
   | 'run_recovery'
-  | 'strength_upper'
+  | 'walk'
+  // Kraft hart
+  | 'strength_heavy'
   | 'strength_lower'
+  // Kraft mittel
+  | 'strength_hypertrophy'
+  | 'strength_upper'
   | 'strength_full'
+  // Kraft/Mobility locker
   | 'strength_short'
+  | 'strength_technique'
   | 'mobility';
 
 /**
  * Feste Eigenschaften pro Session-Typ. Bewusst Code und nicht Datenbank:
- * das sind Trainingsregeln, keine Nutzerdaten. Der Umplaner liest hier,
- * was er verschieben muss und was er streichen darf.
+ * das sind Trainingsregeln, keine Nutzerdaten.
  */
 export interface SessionTypeMeta {
   key: SessionTypeKey;
   label: string;
   discipline: Discipline;
+  /**
+   * Die Intensität. Der Kern der neuen Planung: Erst entscheiden Schicht und
+   * Erholung, welche Intensität ein Tag verträgt, dann wird aus den Einheiten
+   * dieser Intensität eine ausgewählt.
+   */
+  intensity: Intensity;
   /** Key-Session: wird beim Umplanen verschoben, nie gestrichen. */
   isKey: boolean;
-  /** Mindestkapazität des Tages, damit diese Session dort liegen darf. */
+  /** Mindestkapazität des Tages. Nur noch für die manuelle Auswahl im Plan. */
   minCapacity: TrainingCapacity;
-  /**
-   * Belastungsgewicht 1–10. Basis für Wochenlast und Deload-Erkennung.
-   * Sagt nichts darüber aus, ob der Tag als "hart" zählt — das ist
-   * countsAsHardDay.
-   */
+  /** Belastungsgewicht 1–10. Basis für Wochenlast und Deload-Erkennung. */
   load: number;
   /**
-   * Zählt für die Regel "keine zwei harten Tage in Folge".
+   * Zählt für die Regeln "höchstens 3 harte Einheiten pro Woche" und
+   * "nie mehr als 2 harte Tage in Folge".
    *
-   * Bewusst getrennt von load: Krafttraining ist anstrengend, aber es
-   * blockiert den Folgetag nicht so wie eine harte Laufeinheit. Nur Intervalle,
-   * Tempolauf und Long Run zählen deshalb als harter Tag.
+   * Deckt sich jetzt mit `intensity === 'hard'`: Nach den neuen Regeln zählt
+   * auch schweres Krafttraining als harter Tag, nicht mehr nur harte Läufe.
    */
   countsAsHardDay: boolean;
   /** Standarddauer in Minuten, wenn der Generator nichts Besseres weiß. */
@@ -182,137 +309,266 @@ export interface SessionTypeMeta {
   /** Ziel-HF-Zone 1–5, null bei Kraft/Mobility. */
   defaultZone: HrZoneNumber | null;
   defaultRpe: number;
+  /** Ein Halbsatz, was diese Einheit ist — steht in der Auswahl unter dem Namen. */
+  description: string;
 }
 
-export const SESSION_TYPES: Record<SessionTypeKey, SessionTypeMeta> = {
+type SessionTypeDef = Omit<SessionTypeMeta, 'key' | 'countsAsHardDay'>;
+
+const SESSION_TYPE_DEFS: Record<SessionTypeKey, SessionTypeDef> = {
+  /* ---- Ausdauer hart: RPE 8–10 ---- */
   run_intervals: {
-    key: 'run_intervals',
     label: 'Intervalle',
     discipline: 'run',
+    intensity: 'hard',
     isKey: true,
     minCapacity: 'full',
-    countsAsHardDay: true,
     load: 9,
     defaultDurationMin: 60,
     defaultZone: 4,
     defaultRpe: 8,
+    description: 'Kurze harte Abschnitte mit Trabpause.',
   },
-  run_tempo: {
-    key: 'run_tempo',
-    label: 'Tempolauf',
+  run_threshold: {
+    label: 'Schwellenlauf',
     discipline: 'run',
+    intensity: 'hard',
     isKey: true,
     minCapacity: 'full',
-    countsAsHardDay: true,
+    load: 8,
+    defaultDurationMin: 55,
+    defaultZone: 4,
+    defaultRpe: 8,
+    description: 'Lange Blöcke knapp unter der Schwelle.',
+  },
+  run_tempo: {
+    label: 'Tempolauf',
+    discipline: 'run',
+    intensity: 'hard',
+    isKey: true,
+    minCapacity: 'full',
     load: 7,
     defaultDurationMin: 50,
     defaultZone: 3,
     defaultRpe: 7,
+    description: 'Zügiger Block am Stück, kontrolliert hart.',
   },
   run_long: {
-    key: 'run_long',
-    label: 'Long Run',
+    label: 'Long Run mit Endbeschleunigung',
     discipline: 'run',
+    intensity: 'hard',
     isKey: true,
     minCapacity: 'full',
-    countsAsHardDay: true,
     load: 8,
     defaultDurationMin: 90,
     defaultZone: 2,
-    defaultRpe: 6,
+    defaultRpe: 7,
+    description: 'Langer Lauf, die letzten Kilometer forciert.',
   },
-  run_easy: {
-    key: 'run_easy',
-    label: 'Lockerer Lauf',
+
+  /* ---- Ausdauer mittel: RPE 6–7 ---- */
+  run_long_easy: {
+    label: 'Langer Lauf locker',
     discipline: 'run',
+    intensity: 'medium',
+    isKey: true,
+    minCapacity: 'moderate',
+    load: 6,
+    defaultDurationMin: 80,
+    defaultZone: 2,
+    defaultRpe: 6,
+    description: 'Lang, aber durchgehend ruhig — kein Endspurt.',
+  },
+  run_steady: {
+    label: 'Zügiger Dauerlauf',
+    discipline: 'run',
+    intensity: 'medium',
     isKey: false,
     minCapacity: 'moderate',
-    countsAsHardDay: false,
+    load: 5,
+    defaultDurationMin: 55,
+    defaultZone: 3,
+    defaultRpe: 6,
+    description: '40–70 Minuten in gleichmäßig zügigem Tempo.',
+  },
+  run_progressive: {
+    label: 'Steigerungslauf',
+    discipline: 'run',
+    intensity: 'medium',
+    isKey: false,
+    minCapacity: 'moderate',
+    load: 5,
+    defaultDurationMin: 50,
+    defaultZone: 3,
+    defaultRpe: 6,
+    description: 'Ruhig anfangen, Abschnitt für Abschnitt schneller.',
+  },
+
+  /* ---- Ausdauer locker: RPE 3–5 ---- */
+  run_easy: {
+    label: 'Lockerer Lauf',
+    discipline: 'run',
+    intensity: 'easy',
+    isKey: false,
+    minCapacity: 'light',
     load: 4,
     defaultDurationMin: 45,
     defaultZone: 2,
     defaultRpe: 4,
+    description: '20–50 Minuten im Wohlfühltempo.',
   },
   run_recovery: {
-    key: 'run_recovery',
-    label: 'Recovery Run',
+    label: 'Regenerationslauf',
     discipline: 'run',
+    intensity: 'easy',
     isKey: false,
     minCapacity: 'light',
-    countsAsHardDay: false,
     load: 2,
     defaultDurationMin: 30,
     defaultZone: 1,
     defaultRpe: 3,
+    description: 'Bewusst langsam, nur um in Bewegung zu bleiben.',
   },
-  strength_upper: {
-    key: 'strength_upper',
-    label: 'Kraft Oberkörper',
+  walk: {
+    label: 'Spaziergang',
+    discipline: 'mobility',
+    intensity: 'easy',
+    isKey: false,
+    minCapacity: 'light',
+    load: 1,
+    defaultDurationMin: 40,
+    defaultZone: 1,
+    defaultRpe: 2,
+    description: '20–60 Minuten gehen. Zählt als Erholung, nicht als Training.',
+  },
+
+  /* ---- Kraft hart: RPE 8–10 ---- */
+  strength_heavy: {
+    label: 'Kraft schwer',
     discipline: 'strength',
+    intensity: 'hard',
     isKey: true,
     minCapacity: 'moderate',
-    // Bewusst unter der Schwelle für "harter Tag": schweres Oberkörpertraining
-    // beeinträchtigt weder den Lauf noch die Beinarbeit am Folgetag. Läge der
-    // Wert darüber, würde die Regel gegen zwei harte Tage in Folge diese Einheit
-    // dauerhaft blockieren — die beiden freien Tage liegen ja nebeneinander.
-    countsAsHardDay: false,
-    load: 6,
-    defaultDurationMin: 60,
+    load: 10,
+    defaultDurationMin: 70,
     defaultZone: null,
-    defaultRpe: 7,
+    defaultRpe: 9,
+    description: 'Ganzkörper, schwere Grundübungen nahe ans Limit.',
   },
   strength_lower: {
-    key: 'strength_lower',
     label: 'Kraft Unterkörper',
     discipline: 'strength',
+    intensity: 'hard',
     isKey: true,
-    // Ein halber Tag reicht: schwere Beinarbeit passt an den Schlaftag ab 15:00
-    // ebenso wie an den Vormittag vor der Nachtschicht. Nur die harten
-    // Laufeinheiten brauchen wirklich einen ganzen Tag.
     minCapacity: 'moderate',
-    countsAsHardDay: false,
     load: 9,
     defaultDurationMin: 65,
     defaultZone: null,
     defaultRpe: 8,
+    description: 'Beinlastig und schwer — der harte Krafttag.',
   },
-  strength_full: {
-    key: 'strength_full',
-    label: 'Kraft Ganzkörper',
+
+  /* ---- Kraft mittel: RPE 6–7 ---- */
+  strength_hypertrophy: {
+    label: 'Kraft Hypertrophie',
     discipline: 'strength',
+    intensity: 'medium',
     isKey: true,
     minCapacity: 'moderate',
-    countsAsHardDay: false,
+    load: 6,
+    defaultDurationMin: 60,
+    defaultZone: null,
+    defaultRpe: 7,
+    description: 'Moderates Gewicht, mehr Wiederholungen, zwei bis drei Sätze Reserve.',
+  },
+  strength_upper: {
+    label: 'Kraft Oberkörper',
+    discipline: 'strength',
+    intensity: 'medium',
+    isKey: true,
+    minCapacity: 'moderate',
+    load: 6,
+    defaultDurationMin: 60,
+    defaultZone: null,
+    defaultRpe: 7,
+    description: 'Drücken und Ziehen, schont die Beine für den Lauftag.',
+  },
+  strength_full: {
+    label: 'Kraft Ganzkörper',
+    discipline: 'strength',
+    intensity: 'medium',
+    isKey: true,
+    minCapacity: 'moderate',
     load: 7,
     defaultDurationMin: 55,
     defaultZone: null,
     defaultRpe: 7,
+    description: 'Alles einmal, nichts ausgereizt.',
   },
+
+  /* ---- Kraft & Mobility locker: RPE 3–5 ---- */
   strength_short: {
-    key: 'strength_short',
     label: 'Kraft kurz',
     discipline: 'strength',
+    intensity: 'easy',
     isKey: false,
     minCapacity: 'light',
-    countsAsHardDay: false,
     load: 4,
     defaultDurationMin: 35,
     defaultZone: null,
     defaultRpe: 5,
+    description: 'Halbe Stunde, hält die Gewohnheit.',
   },
-  mobility: {
-    key: 'mobility',
-    label: 'Mobility',
-    discipline: 'mobility',
+  strength_technique: {
+    label: 'Technik & leichte Kraft',
+    discipline: 'strength',
+    intensity: 'easy',
     isKey: false,
     minCapacity: 'light',
-    countsAsHardDay: false,
+    load: 3,
+    defaultDurationMin: 35,
+    defaultZone: null,
+    defaultRpe: 4,
+    description: 'Bewegungen sauber machen, kein Gewicht ausreizen.',
+  },
+  mobility: {
+    label: 'Mobility',
+    discipline: 'mobility',
+    intensity: 'easy',
+    isKey: false,
+    minCapacity: 'light',
     load: 1,
     defaultDurationMin: 25,
     defaultZone: null,
     defaultRpe: 2,
+    description: 'Hüfte, Brustwirbelsäule, Sprunggelenk.',
   },
 };
+
+/**
+ * Die Einheitsarten mit abgeleiteten Feldern.
+ *
+ * `countsAsHardDay` wird nicht mehr einzeln gepflegt, sondern aus der
+ * Intensität abgeleitet — sonst könnten die beiden auseinanderlaufen und die
+ * Regel "höchstens 3 harte Einheiten" hinge an einer zweiten Wahrheit.
+ */
+export const SESSION_TYPES: Record<SessionTypeKey, SessionTypeMeta> = Object.fromEntries(
+  (Object.keys(SESSION_TYPE_DEFS) as SessionTypeKey[]).map((key) => [
+    key,
+    {
+      ...SESSION_TYPE_DEFS[key],
+      key,
+      countsAsHardDay: SESSION_TYPE_DEFS[key].intensity === 'hard',
+    },
+  ]),
+) as Record<SessionTypeKey, SessionTypeMeta>;
+
+/** Alle Arten dieser Intensität, in der Reihenfolge des Katalogs. */
+export function typesWithIntensity(intensity: Intensity): SessionTypeKey[] {
+  return (Object.keys(SESSION_TYPES) as SessionTypeKey[]).filter(
+    (k) => SESSION_TYPES[k].intensity === intensity,
+  );
+}
 
 export type MacrocycleGoalKind = 'event' | 'yearRound';
 
@@ -360,20 +616,37 @@ export interface Mesocycle {
   updatedAt: IsoDateTime;
 }
 
-/** Wochenziele als Anzahl Sessions — nicht als Wochentage. Wegen Schicht. */
+/**
+ * Das Wochenziel des Hybrid-Athleten. Anzahl Einheiten, nicht Wochentage —
+ * welcher Tag welche Einheit bekommt, entscheidet die Schicht.
+ *
+ * Bewusst als Richtwert und nicht als Pflicht: Eine Woche mit drei Tagschichten
+ * gibt die Einheiten schlicht nicht her, und dann ist weniger richtig.
+ */
 export interface WeeklyTargets {
+  /** Krafteinheiten pro Woche. Davon `strengthHard` schwer, der Rest mittel. */
   strength: number;
+  /** Harte Ausdauereinheiten pro Woche (Intervalle, Schwelle, Tempo, Long Run). */
   run: number;
+  /** Lockere Ausdauertage pro Woche. Spanne 1–3, hier steht der Zielwert. */
   optional: number;
+  /**
+   * Obergrenze harter Einheiten pro Woche — Ausdauer und Kraft zusammen.
+   * Harte Grenze, kein Richtwert: Was darüber läge, wird locker geplant.
+   */
+  maxHardPerWeek: number;
+  /** Wie viele der Krafteinheiten schwer sein sollen. Üblich: eine. */
+  strengthHard: number;
 }
 
 /**
- * Ein Mikrozyklus ist bei Cllctr **ein Durchlauf der Schichtrotation**, nicht eine
- * Kalenderwoche. Bei einer 5-Tage-Rotation sind das fünf Tage.
+ * Ein Mikrozyklus ist eine **Kalenderwoche**, Montag bis Sonntag.
  *
- * Grund: Nur so ist jeder Zyklus gleich aufgebaut und die Belastung schwankt nicht
- * zufällig damit, wie die Rotation gerade in der Woche liegt. Angezeigt wird der
- * Fortschritt trotzdem in Wochen — das rechnet die Oberfläche um.
+ * Früher war es ein Durchlauf der Schichtrotation. Das passte, solange der Plan
+ * aus der Rotation entstand. Die Regeln zählen aber in Wochen — höchstens drei
+ * harte Einheiten pro Woche, Wochenkilometer plus 5–10 % pro Woche, Deload alle
+ * vier bis sechs Wochen. Ein Zyklus, der quer zur Woche liegt, könnte keine
+ * dieser Regeln sauber einhalten.
  */
 export interface Microcycle {
   id: string;
@@ -382,8 +655,12 @@ export interface Microcycle {
   index: number;
   startDate: IsoDate;
   endDate: IsoDate;
-  /** Länge des Zyklus in Tagen, entspricht der Länge der Rotation. */
+  /** Länge in Tagen. 7, außer bei der angebrochenen ersten Woche. */
   lengthDays: number;
+  /** Geplante harte Einheiten dieser Woche. Nie mehr als maxHardPerWeek. */
+  plannedHard: number;
+  /** Geplante Trainingsminuten. Grundlage für die Steigerung von Woche zu Woche. */
+  plannedMinutes: number;
   isDeload: boolean;
   targetSessions: WeeklyTargets;
   /** Summe der load-Werte aller geplanten Sessions. Basis für Deload-Erkennung. */
@@ -423,6 +700,11 @@ export interface Session {
   orderInDay: number;
   discipline: Discipline;
   type: SessionTypeKey;
+  /**
+   * Kopie aus SESSION_TYPES. Mitgespeichert, damit eine erledigte Einheit auch
+   * dann noch sagt, wie hart sie war, wenn der Katalog sich später ändert.
+   */
+  intensity: Intensity;
   title: string;
   plannedDurationMin: number | null;
   plannedDistanceKm: number | null;
@@ -454,6 +736,11 @@ export interface Session {
   originalDate: IsoDate | null;
   /** Warum die App so umgeplant hat — wird dem Nutzer angezeigt. */
   rescheduleReason: string | null;
+  /**
+   * Warum an diesem Tag genau diese Intensität steht — ein Satz aus dem
+   * Regelwerk, z.B. "Nachtschicht bei hoher Erholung: hart möglich".
+   */
+  planReason: string | null;
   /** Vom Nutzer fixiert: der Umplaner fasst diese Session nicht an. */
   locked: boolean;
   manuallyEdited: boolean;
@@ -705,6 +992,17 @@ export interface Settings {
    * dass man ihn neu erzeugen muss. Aus heißt: die App wartet auf den Knopf.
    */
   autoUpdatePlan: boolean;
+  /**
+   * Wie viele harte Tage direkt aufeinanderfolgen dürfen. Standard 2 — die
+   * Regel aus dem Regelwerk. Der dritte harte Tag in Folge wird nie geplant.
+   */
+  maxConsecutiveHardDays: number;
+  /**
+   * Um wie viel Prozent das Wochenvolumen höchstens wachsen darf, wenn die
+   * Erholung mitspielt. 5–10 % ist der brauchbare Bereich; darüber holt der
+   * Körper die Steigerung nicht mehr ein.
+   */
+  weeklyVolumeGrowthPct: number;
   /** Zwei harte Tage dürfen nicht direkt aufeinanderfolgen. */
   minHoursBetweenKeySessions: number;
   /** Wie viele Tage der Umplaner nach vorne suchen darf. */

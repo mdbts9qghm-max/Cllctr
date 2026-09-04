@@ -53,16 +53,23 @@ function zoneText(zones: HrZone[], zone: number | null): string {
  * Obergrenze. Danach bleibt die Einheit stehen — ein Long Run, der ewig weiter
  * wächst, ist irgendwann kein Training mehr, sondern ein Wettkampf.
  */
-const RUN_RAMP: Record<'run_long' | 'run_easy' | 'run_recovery' | 'run_tempo', {
-  base: number;
-  per: number;
-  cap: number;
-}> = {
+const RUN_RAMP: Record<
+  'run_long' | 'run_long_easy' | 'run_easy' | 'run_recovery' | 'run_tempo' | 'run_threshold' | 'run_steady' | 'run_progressive' | 'walk',
+  { base: number; per: number; cap: number }
+> = {
   run_long: { base: 45, per: 6, cap: 120 },
+  // Der komplett lockere lange Lauf darf länger werden als der harte: Ohne
+  // forciertes Ende ist die Länge der einzige Reiz, und sie kostet weniger.
+  run_long_easy: { base: 45, per: 5, cap: 110 },
   run_easy: { base: 25, per: 3, cap: 60 },
   run_recovery: { base: 20, per: 2, cap: 35 },
   // Beim Tempolauf zählt nur der Hauptteil; Ein- und Auslaufen kommen dazu.
   run_tempo: { base: 10, per: 2, cap: 30 },
+  // Schwellenblöcke wachsen langsamer als Tempo — sie liegen härter.
+  run_threshold: { base: 8, per: 2, cap: 40 },
+  run_steady: { base: 40, per: 3, cap: 70 },
+  run_progressive: { base: 35, per: 3, cap: 60 },
+  walk: { base: 30, per: 0, cap: 60 },
 };
 
 function ramp(key: keyof typeof RUN_RAMP, step: number): number {
@@ -311,23 +318,24 @@ function formFor(
           note: 'Deload: rund 60 % der aktuellen Länge, sonst unverändert.',
         };
       }
+      // Die Endbeschleunigung gehört von Anfang an dazu: Sie ist das, was diese
+      // Einheit zur harten macht. Ohne sie wäre sie der lange lockere Lauf, und
+      // den gibt es als eigene Art. Wie lang der zügige Teil ist, wächst mit
+      // der Stufe.
+      const finish = level >= 4 ? 15 : level >= 2 ? 10 : 5;
       const content: SessionBlock[] = [
-        { label: 'Dauerlauf', detail: `${mins} Min ${zoneText(zones, 2)}` },
-      ];
-      // Ein zügiger Schluss ist eine zusätzliche Belastung — die kommt erst,
-      // wenn die reine Länge steht.
-      if (level >= 4) {
-        content.push({
+        { label: 'Dauerlauf', detail: `${mins - finish} Min ${zoneText(zones, 2)}` },
+        {
           label: 'Schluss',
-          detail: 'Letzte 10 Min etwas zügiger, wenn es sich gut anfühlt',
-        });
-      }
+          detail: `Letzte ${finish} Min zügiger, ${zoneText(zones, 3)}`,
+        },
+      ];
       return {
         content,
         durationMin: mins,
         note:
           level === 0
-            ? 'Erster langer Lauf — 45 Minuten locker, egal wie gut es sich anfühlt.'
+            ? 'Erster langer Lauf — 45 Minuten, davon die letzten 5 etwas zügiger. Mehr nicht.'
             : atCap('run_long', level)
               ? `Stufe ${level}: ${mins} Min — die geplante Obergrenze für den langen Lauf.`
               : `Stufe ${level}: ${mins} Min, 6 Min länger als beim letzten Mal.`,
@@ -344,6 +352,152 @@ function formFor(
           : level === 0
             ? 'Erster ruhiger Dauerlauf — 25 Minuten, mehr nicht.'
             : `Stufe ${level}: ${mins} Min, 3 Min mehr als beim letzten Mal.`,
+      };
+    }
+
+    case 'run_threshold': {
+      const main = ramp('run_threshold', level);
+      // Ein Block, solange er kurz ist; darüber in zwei Teile mit kurzer Pause.
+      // Zwanzig Minuten an der Schwelle am Stück sind für die meisten der Punkt,
+      // an dem die Technik nachlässt — dann bringt Aufteilen mehr als Durchbeißen.
+      const detail =
+        main <= 20
+          ? `${main} Min am Stück ${zoneText(zones, 4)}`
+          : `2× ${Math.round(main / 2)} Min ${zoneText(zones, 4)}, 3 Min Trabpause`;
+      if (isDeload) {
+        return {
+          content: [warmup, { label: 'Hauptteil', detail: `${Math.max(8, Math.round(main * 0.6))} Min ${zoneText(zones, 3)}` }, cooldown],
+          durationMin: round5(main * 0.6 + 25),
+          note: 'Deload: kürzer und eine Zone lockerer.',
+        };
+      }
+      return {
+        content: [warmup, { label: 'Hauptteil', detail }, cooldown],
+        durationMin: round5(main + 25),
+        note:
+          level === 0
+            ? 'Erster Schwellenlauf — 8 Minuten reichen. Das Tempo ist das, das du eine Stunde durchhalten würdest.'
+            : atCap('run_threshold', level)
+              ? `Stufe ${level}: ${main} Min an der Schwelle — die Obergrenze ist erreicht.`
+              : `Stufe ${level}: ${main} Min an der Schwelle, 2 Min mehr als beim letzten Mal.`,
+      };
+    }
+
+    case 'run_long_easy': {
+      const mins = isDeload ? round5(ramp('run_long_easy', level) * 0.6) : ramp('run_long_easy', level);
+      return {
+        content: [
+          { label: 'Dauerlauf', detail: `${mins} Min ${zoneText(zones, 2)}` },
+          { label: 'Tempo', detail: 'Durchgehend ruhig. Kein Endspurt, auch wenn es sich gut anfühlt.' },
+        ],
+        durationMin: mins,
+        note:
+          level === 0
+            ? 'Langer Lauf ohne harten Reiz — die Länge ist das Training, nicht das Tempo.'
+            : `Stufe ${level}: ${mins} Min, 5 Min länger als beim letzten Mal.`,
+      };
+    }
+
+    case 'run_steady': {
+      const mins = isDeload ? round5(ramp('run_steady', level) * 0.7) : ramp('run_steady', level);
+      return {
+        content: [{ label: 'Dauerlauf', detail: `${mins} Min ${zoneText(zones, 3)}, gleichmäßig zügig` }],
+        durationMin: mins,
+        note:
+          level === 0
+            ? 'Zügiger Dauerlauf — schnell genug, dass Reden anstrengt, langsam genug, dass es geht.'
+            : `Stufe ${level}: ${mins} Min zügig, 3 Min mehr als beim letzten Mal.`,
+      };
+    }
+
+    case 'run_progressive': {
+      const mins = isDeload ? round5(ramp('run_progressive', level) * 0.7) : ramp('run_progressive', level);
+      const third = Math.round(mins / 3);
+      return {
+        content: [
+          // Die Gesamtlänge steht zuerst: In der Übersicht wird nur der erste
+          // Block gezeigt, und "12 Min Zone 1" wäre dort die falsche Auskunft.
+          { label: 'Dauerlauf', detail: `${mins} Min, jedes Drittel eine Zone schneller` },
+          { label: 'Erstes Drittel', detail: `${third} Min ${zoneText(zones, 1)}` },
+          { label: 'Zweites Drittel', detail: `${third} Min ${zoneText(zones, 2)}` },
+          { label: 'Letztes Drittel', detail: `${mins - 2 * third} Min ${zoneText(zones, 3)}` },
+        ],
+        durationMin: mins,
+        note:
+          level === 0
+            ? 'Steigerungslauf — jedes Drittel eine Zone schneller. Der Schluss ist zügig, nicht hart.'
+            : `Stufe ${level}: ${mins} Min, 3 Min mehr als beim letzten Mal.`,
+      };
+    }
+
+    case 'walk': {
+      return {
+        content: [{ label: 'Spaziergang', detail: '30–45 Min zügig gehen, draußen' }],
+        durationMin: 35,
+        note: 'Kein Training, sondern Erholung — zählt nicht für die Wochenziele.',
+      };
+    }
+
+    case 'strength_heavy': {
+      if (isDeload) {
+        return {
+          content: [
+            { label: 'Kniebeuge', detail: `3× ${LOWER[0].repMin} bei ca. 60 %` },
+            { label: 'Bankdrücken', detail: `3× ${UPPER[0].repMin} bei ca. 60 %` },
+            { label: 'Rumpf', detail: '3 Sätze' },
+          ],
+          durationMin: 40,
+          note: 'Deload: gleiche Übungen, deutlich weniger Gewicht. Die Stufe bleibt stehen.',
+        };
+      }
+      const squat = liftAt(LOWER[0], level);
+      return {
+        content: [
+          { label: LOWER[0].name, detail: liftDetail(LOWER[0], level) },
+          { label: LOWER[1].name, detail: liftDetail(LOWER[1], level) },
+          { label: UPPER[0].name, detail: liftDetail(UPPER[0], level) },
+          { label: UPPER[1].name, detail: liftDetail(UPPER[1], level) },
+          { label: 'Rumpf', detail: '3 Sätze' },
+          { label: 'Intensität', detail: 'Die letzten beiden Sätze der Grundübungen mit ein bis zwei Wiederholungen Reserve.' },
+        ],
+        durationMin: SESSION_TYPES.strength_heavy.defaultDurationMin,
+        note:
+          level === 0
+            ? 'Erster schwerer Ganzkörpertag — bewusst leicht anfangen, die Steigerung kommt ab dem nächsten Mal.'
+            : squat.justIncreased
+              ? `Stufe ${level}: Wiederholungsspanne ausgereizt — jetzt mehr Gewicht, zurück auf ${squat.reps} Wiederholungen.`
+              : `Stufe ${level}: gleiches Gewicht, ${squat.reps} statt ${squat.reps - 1} Wiederholungen.`,
+      };
+    }
+
+    case 'strength_hypertrophy': {
+      // Hypertrophie steigert über Sätze und Wiederholungen, nicht über
+      // Maximalgewicht: Der schwere Tag der Woche ist ein anderer.
+      const sets = Math.min(4, 3 + Math.floor(level / 6));
+      const reps = 8 + (level % 4);
+      return {
+        content: [
+          { label: 'Beinpresse oder Kniebeuge', detail: `${sets}× ${reps} mit 2–3 Wiederholungen Reserve` },
+          { label: 'Drücken', detail: `${sets}× ${reps}` },
+          { label: 'Ziehen', detail: `${sets}× ${reps}` },
+          { label: 'Zusatzübung nach Wahl', detail: '2× 12–15' },
+        ],
+        durationMin: isDeload ? 40 : SESSION_TYPES.strength_hypertrophy.defaultDurationMin,
+        note: isDeload
+          ? 'Deload: zwei Sätze weniger, gleiches Gewicht.'
+          : `Stufe ${level}: ${sets}× ${reps} — moderates Gewicht, sauber bis zum letzten Satz.`,
+      };
+    }
+
+    case 'strength_technique': {
+      return {
+        content: [
+          { label: 'Grundübungen', detail: '3× 5 mit ca. 50 % — auf die Ausführung achten' },
+          { label: 'Einbeinig', detail: '2× 10 je Bein, Eigengewicht' },
+          { label: 'Rumpf & Mobility', detail: '10 Min' },
+        ],
+        durationMin: SESSION_TYPES.strength_technique.defaultDurationMin,
+        note: 'Technikeinheit — kein Reiz, keine Steigerung. Zählt nicht für die Stufe.',
       };
     }
 
@@ -459,10 +613,16 @@ function formFor(
  */
 export const PROGRESSING_TYPES: SessionTypeKey[] = [
   'run_intervals',
+  'run_threshold',
   'run_tempo',
   'run_long',
+  'run_long_easy',
+  'run_steady',
+  'run_progressive',
   'run_easy',
+  'strength_heavy',
   'strength_lower',
+  'strength_hypertrophy',
   'strength_upper',
 ];
 

@@ -7,7 +7,7 @@
  * eigentliche Grund, warum man dem Plan folgt.
  *
  * Alle Regeln lesen nur aus dem, was der Generator ohnehin entschieden hat:
- * Schichtkapazität, Position im Zyklus, Nachbartage.
+ * Schicht, Erholung, Position in der Woche, Nachbartage.
  */
 
 import { addDays, formatShort } from './dates';
@@ -65,6 +65,12 @@ export function explainSession(
 
   if (session.rescheduleReason) {
     reason = session.rescheduleReason;
+  } else if (session.planReason) {
+    // Der Generator hat beim Planen bereits begründet, warum dieser Tag diese
+    // Intensität bekommt — Schicht, Erholung und die Wochenregeln, die gegriffen
+    // haben. Diese Begründung ist die richtige; hier noch einmal aus der
+    // Kapazität eine zweite zu bauen hieße, zwei Wahrheiten zu pflegen.
+    reason = session.planReason;
   } else if (meta.minCapacity === 'full') {
     const next = nextCapableDay(session.date, session.type, ctx);
     reason = next
@@ -80,12 +86,12 @@ export function explainSession(
       `${day.shiftType.name}${day.shiftType.trainingWindow ? `, ${day.shiftType.trainingWindow}` : ''} — ` +
       `normales Volumen geht, nichts Hartes. ${meta.label} passt genau dahin.`;
   } else {
-    reason = `${day.shiftType.name} — voller Tag. ${meta.label} steht im Zyklus als Nächstes an.`;
+    reason = `${day.shiftType.name} — voller Tag. ${meta.label} steht diese Woche als Nächstes an.`;
   }
 
   // --- Zusatzhinweise ---
   if (options.microcycle?.isDeload) {
-    notes.push('Deload-Zyklus: bewusst kürzer und lockerer als sonst. Das ist so gewollt.');
+    notes.push('Deload-Woche: bewusst kürzer und lockerer als sonst. Das ist so gewollt.');
   }
 
   if (day.afterNightShift) {
@@ -131,7 +137,7 @@ export function explainRestDay(
 
   let reason: string;
   if (cancelledToday.length > 0) {
-    // Nicht „der Zyklus ist voll" behaupten, wenn der Tag schlicht ausgefallen ist.
+    // Nicht „die Woche ist voll" behaupten, wenn der Tag schlicht ausgefallen ist.
     const titles = cancelledToday.map((s) => s.title).join(' und ');
     reason =
       cancelledToday.length === 1
@@ -142,11 +148,11 @@ export function explainRestDay(
   } else if (day.afterNightShift) {
     reason = `${day.shiftType.name} nach der Nachtschicht — heute ist Ruhetag.`;
   } else {
-    reason = 'Ruhetag. Der Zyklus ist voll, heute steht nichts an.';
+    reason = 'Ruhetag. Die Wochenziele sind gedeckt, heute steht nichts an.';
   }
 
   if (cancelledToday.length > 0) {
-    notes.push('Ein ausgefallener Tag bricht nichts — der nächste Zyklus läuft unverändert weiter.');
+    notes.push('Ein ausgefallener Tag bricht nichts — die nächste Woche läuft unverändert weiter.');
   } else if (day.capacity === 'full') {
     notes.push('Der Tag wäre frei — Erholung ist hier die bessere Investition als eine Zusatzeinheit.');
   }
@@ -162,9 +168,9 @@ export interface BlockStatus {
   cycleIndex: number;
   cyclesPerMeso: number;
   isDeload: boolean;
-  /** Zyklen bis zum nächsten Deload, 0 wenn er läuft. */
+  /** Wochen bis zum nächsten Deload, 0 wenn er läuft. */
   cyclesToDeload: number;
-  /** Ungefähre Tage bis zum Deload — für Menschen greifbarer als Zyklen. */
+  /** Ungefähre Tage bis zum Deload — für Menschen greifbarer als Wochen. */
   daysToDeload: number;
   doneInCycle: number;
   plannedInCycle: number;
@@ -188,8 +194,8 @@ export function blockStatus(
   const summary = micro.isDeload
     ? 'Deload läuft — danach beginnt der nächste Block.'
     : cyclesToDeload <= 1
-      ? 'Deload beginnt mit dem nächsten Zyklus.'
-      : `Deload in ${cyclesToDeload} Zyklen, also in etwa ${daysToDeload} Tagen.`;
+      ? 'Deload beginnt mit der nächsten Woche.'
+      : `Deload in ${cyclesToDeload} Wochen, also in etwa ${daysToDeload} Tagen.`;
 
   return {
     cycleIndex: micro.index,

@@ -6,14 +6,14 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 import { formatShort, monthKey, today } from '@/lib/dates';
 import { useSettings, useShiftContext } from '@/lib/hooks';
-import { capacityAllows, capacityExplanation, resolveShiftDay } from '@/lib/shifts';
+import { capacityAllows, resolveShiftDay } from '@/lib/shifts';
 import {
   applyRescheduleProposal,
   buildRescheduleProposal,
   cancelSession,
   clearActivePlan,
   currentProgressionLevels,
-  MESOCYCLE_COUNT,
+  PLAN_WEEKS,
   setProgressionLevel,
   createAndSavePlan,
   markSessionMissed,
@@ -25,6 +25,7 @@ import type { ReschedulePlan } from '@/lib/replan';
 import { SESSION_STATUS_LABEL, SESSION_TYPES, type Session, type Soul } from '@/lib/types';
 import { MonthGrid } from '@/components/MonthGrid';
 import { ShiftPicker } from '@/components/ShiftPicker';
+import { DayCoach } from '@/components/DayCoach';
 import { Button, Card, Mark, Notice, Section } from '@/components/ui';
 import { NewRecordsNotice, SessionLogForm } from '@/components/SessionLogForm';
 
@@ -69,32 +70,27 @@ export default function PlanPage() {
         startDate: today(),
         ctx,
         settings,
-        mesocycleCount: MESOCYCLE_COUNT,
+        weeks: PLAN_WEEKS,
       });
       const resumed = Object.values(result.progressionBase).filter((n) => n > 0).length;
       const parts = [
-        `Plan erzeugt: ${result.sessions.length} Einheiten über ${result.microcycles.length} Zyklen.`,
+        `Plan erzeugt: ${result.sessions.length} Einheiten über ${result.microcycles.length} Wochen.`,
         resumed === 0
           ? 'Die Steigerung startet bei Stufe 0.'
           : `Die Steigerung setzt auf deinen erledigten Einheiten auf — ${resumed} ${
               resumed === 1 ? 'Einheitsart steht' : 'Einheitsarten stehen'
             } bereits höher.`,
       ];
-      if (result.doubleDays.length > 0) {
-        const n = result.doubleDays.length;
+      const rest = result.restDays.length;
+      if (rest > 0) {
         parts.push(
-          `${n} ${n === 1 ? 'Doppeltag' : 'Doppeltage'} nötig — dort liegen Laufen und Kraft am selben freien Tag.`,
+          `${rest} ${rest === 1 ? 'Ruhetag' : 'Ruhetage'} — Schicht oder Erholung ließen dort nichts zu.`,
         );
       }
-      if (result.unplaced.length > 0) {
-        const n = result.unplaced.length;
-        const grund = ctx.pattern
-          ? 'die Rotation gibt in diesen Zyklen nicht mehr her'
-          : 'die eingetragenen Schichten geben nicht mehr her';
+      if (result.shortfalls.length > 0) {
+        const n = result.shortfalls.length;
         parts.push(
-          n === 1
-            ? `Eine Einheit fand keinen Tag; ${grund}.`
-            : `${n} Einheiten fanden keinen Tag; ${grund}.`,
+          `In ${n} ${n === 1 ? 'Woche' : 'Wochen'} wurde das Wochenziel nicht voll erreicht; die Schichten gaben nicht mehr her.`,
         );
       }
       setMessage(parts.join(' '));
@@ -125,12 +121,12 @@ export default function PlanPage() {
         ) : null}
         <Section
           title="Noch kein Plan"
-          hint="Cllctr baut den Plan aus deiner Schichtrotation. Ein Mikrozyklus ist ein voller Rotationsdurchlauf, kein Kalenderwoche — nur so ist jeder Zyklus gleich aufgebaut."
+          hint="Cllctr plant Tag für Tag: Erst zählt die Erholung, dann die Schicht, dann das Training. Ein Mikrozyklus ist eine Kalenderwoche."
         >
           <Card>
             <p className="mb-4 text-sm leading-relaxed text-ink-muted">
-              Erzeugt {MESOCYCLE_COUNT} Blöcke à {settings.mesoLoadCycles} Belastungs- und{' '}
-              {settings.mesoDeloadCycles} Deload-Zyklus, beginnend heute.
+              Erzeugt {PLAN_WEEKS} Wochen ab heute — {settings.mesoLoadCycles} Belastungswochen,
+              dann {settings.mesoDeloadCycles} Deload-Woche, und von vorn.
             </p>
             <p className="mb-4 text-sm leading-relaxed text-ink-muted">
               Jede Einheitsart startet auf Stufe 0 und steigert sich mit jedem Mal — der lange
@@ -156,7 +152,7 @@ export default function PlanPage() {
     ? settings.mesoLoadCycles - activeMicro.index + (activeMicro.isDeload ? cyclesPerMeso : 0)
     : 0;
 
-  // Abgeschlossene Zyklen bleiben beim Neuerzeugen stehen — sie sind der
+  // Abgeschlossene Wochen bleiben beim Neuerzeugen stehen — sie sind der
   // Verlauf. Standardmäßig ausgeblendet, damit der Plan nicht mit jedem Monat
   // länger scrollt.
   const doneCount = plan.sessions.filter((x) => x.status === 'done').length;
@@ -164,7 +160,7 @@ export default function PlanPage() {
   /** Steht überhaupt noch etwas an? Sonst gibt es nur Verlauf. */
   const hasFuturePlan = plan.micros.some((m) => m.endDate >= todayIso);
 
-  // Erledigte Einheiten, deren Zyklus nicht mehr existiert. Ohne eigene Liste
+  // Erledigte Einheiten, deren Woche nicht mehr existiert. Ohne eigene Liste
   // wären sie unsichtbar, obwohl sie in der Datenbank stehen — und genau das
   // fühlt sich an, als wäre etwas verloren gegangen.
   const orphans = plan.sessions
@@ -198,6 +194,11 @@ export default function PlanPage() {
    * Kontext, Plan, die offenen Formulare. Als eigene Datei müsste ein Dutzend
    * Dinge durchgereicht werden, ohne dass irgendwo etwas gewonnen wäre.
    */
+  /** Die Woche, in der dieser Tag liegt — für die Deload-Marke im Tagesdetail. */
+  function microByDate(date: string) {
+    return plan!.micros.find((m) => m.startDate <= date && date <= m.endDate);
+  }
+
   function DayDetail({ date }: { date: string }) {
     const day = resolveShiftDay(date, ctx!);
     const own = plan!.sessions
@@ -218,11 +219,15 @@ export default function PlanPage() {
           </p>
         </div>
 
-        {own.length === 0 ? (
-          <p className="mb-3 text-sm leading-relaxed text-ink-muted">
-            {capacityExplanation(day)}
-          </p>
-        ) : null}
+        <div className="mb-3">
+          <DayCoach
+            day={day}
+            settings={settings!}
+            sessions={own}
+            allSessions={plan!.sessions}
+            isDeloadWeek={microByDate(date)?.isDeload ?? false}
+          />
+        </div>
 
         <div className="space-y-3">
           {own.map((session) => {
@@ -432,9 +437,9 @@ export default function PlanPage() {
         >
           <Card>
             <p className="mb-4 text-sm leading-relaxed text-ink-muted">
-              Erzeugt {MESOCYCLE_COUNT} Blöcke à {settings.mesoLoadCycles} Belastungs- und{' '}
-              {settings.mesoDeloadCycles} Deload-Zyklus, beginnend heute. Die Steigerung setzt auf
-              deinen erledigten Einheiten auf.
+              Erzeugt {PLAN_WEEKS} Wochen ab heute — {settings.mesoLoadCycles} Belastungswochen,
+              dann {settings.mesoDeloadCycles} Deload-Woche. Die Steigerung setzt auf deinen
+              erledigten Einheiten auf.
             </p>
             <Button variant="primary" onClick={() => void generate()} disabled={busy}>
               {busy ? 'Erzeuge …' : 'Plan erzeugen'}
@@ -447,7 +452,7 @@ export default function PlanPage() {
         <Section title="Stand im Block">
           <Card>
             <p className="text-sm text-ink">
-              {ctx.pattern ? 'Zyklus' : 'Woche'} {activeMicro.index} von {cyclesPerMeso}
+              Woche {activeMicro.index} von {cyclesPerMeso}
               {activeMicro.isDeload ? ' — Deload läuft' : ''}
             </p>
             <p className="mt-1 text-xs leading-relaxed text-ink-faint">
@@ -457,8 +462,8 @@ export default function PlanPage() {
                 : `Deload in ${Math.max(0, cyclesToDeload)} ${
                     ctx.pattern
                       ? cyclesToDeload === 1
-                        ? 'Zyklus'
-                        : 'Zyklen'
+                        ? 'Woche'
+                        : 'Wochen'
                       : cyclesToDeload === 1
                         ? 'Woche'
                         : 'Wochen'
@@ -596,8 +601,8 @@ export default function PlanPage() {
         {orphans.length > 0 ? (
           <p className="mt-5 text-xs leading-relaxed text-ink-faint">
             {orphans.length === 1
-              ? 'Eine erledigte Einheit gehört zu keinem Zyklus mehr — sie steht im '
-              : `${orphans.length} erledigte Einheiten gehören zu keinem Zyklus mehr — sie stehen im `}
+              ? 'Eine erledigte Einheit gehört zu keiner Woche mehr — sie steht im '
+              : `${orphans.length} erledigte Einheiten gehören zu keiner Woche mehr — sie stehen im `}
             <Link href="/logbuch" className="text-ember underline">
               Logbuch
             </Link>
@@ -609,7 +614,7 @@ export default function PlanPage() {
       {hasFuturePlan ? (
       <Section
         title="Plan neu erzeugen"
-        hint="Normalerweise nicht nötig — der Plan passt sich bei Änderungen von selbst an. Hier nur, wenn du bewusst neu würfeln willst. Ersetzt wird nur, was ab heute geplant ist; abgeschlossene Zyklen, Erledigtes und Fixiertes bleiben unangetastet."
+        hint="Normalerweise nicht nötig — der Plan passt sich bei Änderungen von selbst an. Hier nur, wenn du bewusst neu würfeln willst. Ersetzt wird nur, was ab heute geplant ist; abgeschlossene Wochen, Erledigtes und Fixiertes bleiben unangetastet."
       >
         <Card>
           {confirmRegenerate ? (

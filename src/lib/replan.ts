@@ -44,19 +44,29 @@ import {
 const HARD_LOAD_THRESHOLD = 7;
 
 /**
- * Keine zwei harten Tage in Folge. Als hart zählen nur harte Laufeinheiten
- * (SessionTypeMeta.countsAsHardDay) — Krafttraining nicht.
+ * Wie viele harte Tage in Folge liegen dürfen. Zwei, wie im Regelwerk — und
+ * anders als früher zählt schweres Krafttraining mit, nicht nur harte Läufe.
+ *
+ * Der Wert steht doppelt (hier und in den Einstellungen), weil das Umplanen
+ * einen einzelnen Tag prüft und dabei keinen Zugriff auf den Kontext der ganzen
+ * Woche hat. Weicht die Einstellung ab, gewinnt sie — siehe `maxHardStreak`.
  */
-const MAX_CONSECUTIVE_HARD_DAYS = 1;
+const DEFAULT_MAX_CONSECUTIVE_HARD_DAYS = 2;
 
 /**
  * Reduzierte Ersatzformen, in Rangfolge. Bekommt eine Key-Session keinen vollen
  * Tag mehr, ist eine kleinere Version besser als gar nichts.
  */
 const DOWNGRADES: Partial<Record<SessionTypeKey, SessionTypeKey[]>> = {
-  run_long: ['run_easy', 'run_recovery'],
-  run_intervals: ['run_tempo', 'run_easy'],
-  run_tempo: ['run_easy'],
+  run_long: ['run_long_easy', 'run_easy', 'run_recovery'],
+  run_long_easy: ['run_easy', 'run_recovery'],
+  run_intervals: ['run_tempo', 'run_steady', 'run_easy'],
+  run_threshold: ['run_tempo', 'run_steady', 'run_easy'],
+  run_tempo: ['run_steady', 'run_easy'],
+  run_steady: ['run_easy'],
+  run_progressive: ['run_easy'],
+  strength_heavy: ['strength_hypertrophy', 'strength_short'],
+  strength_hypertrophy: ['strength_upper', 'strength_short'],
   strength_lower: ['strength_upper', 'strength_short'],
   strength_upper: ['strength_short'],
   strength_full: ['strength_short'],
@@ -156,12 +166,18 @@ function sessionsByDate(sessions: Session[]): Map<IsoDate, Session[]> {
   return map;
 }
 
+/** Die Streak-Grenze aus den Einstellungen, mit Rückfall auf den Standardwert. */
+function maxHardStreak(settings: Settings): number {
+  return Math.max(1, settings.maxConsecutiveHardDays ?? DEFAULT_MAX_CONSECUTIVE_HARD_DAYS);
+}
+
 /** Würde eine harte Einheit an diesem Tag einen zu langen Block erzeugen? */
 function hardBlockOk(
   date: IsoDate,
   type: SessionTypeKey,
   byDate: Map<IsoDate, Session[]>,
   ignoreIds: Set<string>,
+  maxStreak = DEFAULT_MAX_CONSECUTIVE_HARD_DAYS,
 ): boolean {
   if (!SESSION_TYPES[type].countsAsHardDay) return true;
 
@@ -173,7 +189,7 @@ function hardBlockOk(
   let run = 1;
   for (let d = addDays(date, -1); hardOn(d); d = addDays(d, -1)) run++;
   for (let d = addDays(date, 1); hardOn(d); d = addDays(d, 1)) run++;
-  return run <= MAX_CONSECUTIVE_HARD_DAYS;
+  return run <= maxStreak;
 }
 
 /**
@@ -229,7 +245,7 @@ function findPlacement(
       );
       if (sameTypeNeighbour) continue;
 
-      if (!hardBlockOk(day.date, form, byDate, ignore)) continue;
+      if (!hardBlockOk(day.date, form, byDate, ignore, maxHardStreak(settings))) continue;
 
       // Variante Doppeltag: der Tag ist belegt, aber voll belastbar und trägt
       // genau eine Einheit der anderen Disziplin. Nichts geht verloren.
@@ -551,6 +567,7 @@ export function applyRescheduleToSessions(sessions: Session[], plan: RescheduleP
               type: move.newType,
               title: meta.label,
               discipline: meta.discipline,
+              intensity: meta.intensity,
               plannedDurationMin: move.newDurationMin,
               zone: meta.defaultZone,
               targetRpe: move.newTargetRpe ?? meta.defaultRpe,

@@ -108,7 +108,7 @@ function totalMinutes(ctx: SoulContext): number {
 export type CycleVerdict = 'clean' | 'broken' | 'running' | 'paused';
 
 /**
- * War dieser Zyklus sauber?
+ * War diese Woche sauber?
  *
  * Sauber heißt: jede geplante Einheit wurde entweder erledigt oder regelkonform
  * umgeplant. Der Unterschied liegt im Status — `skipped` mit Begründung ist eine
@@ -121,8 +121,8 @@ export function cycleVerdict(micro: Microcycle, sessions: Session[], today: IsoD
   const own = sessions.filter((s) => s.microcycleId === micro.id);
   if (own.length === 0) return 'running';
 
-  // Ist in diesem Zyklus alles gestrichen worden — Krankheit, Abwesenheit —,
-  // dann gab es nichts zu halten. Ein solcher Zyklus verdient keine Seele, darf
+  // Ist in dieser Woche alles gestrichen worden — Krankheit, Abwesenheit —,
+  // dann gab es nichts zu halten. Eine solche Woche verdient keine Seele, darf
   // die Serie aber auch nicht brechen: eine Grippe ist kein Versäumnis.
   if (own.every((s) => s.status === 'skipped')) return 'paused';
 
@@ -137,7 +137,7 @@ export function cycleVerdict(micro: Microcycle, sessions: Session[], today: IsoD
   return 'clean';
 }
 
-/** Wie viele abgeschlossene Zyklen in Folge sauber waren, bis heute zurück. */
+/** Wie viele abgeschlossene Wochen in Folge sauber waren, bis heute zurück. */
 export function currentStreak(ctx: SoulContext): number {
   const finished = ctx.microcycles
     .filter((m) => m.endDate < ctx.today)
@@ -146,7 +146,7 @@ export function currentStreak(ctx: SoulContext): number {
   let streak = 0;
   for (let i = finished.length - 1; i >= 0; i--) {
     const verdict = cycleVerdict(finished[i], ctx.sessions, ctx.today);
-    // Ein ausgesetzter Zyklus zählt nicht mit, unterbricht die Serie aber auch
+    // Eine ausgesetzte Woche zählt nicht mit, unterbricht die Serie aber auch
     // nicht — sie läuft dahinter weiter.
     if (verdict === 'paused') continue;
     if (verdict === 'clean') streak++;
@@ -215,7 +215,7 @@ function streakSoul(
         if (cycleVerdict(micro, ctx.sessions, ctx.today) === 'clean') {
           run++;
           if (run >= target) {
-            return [{ sourceId: null, detail: `${target} Zyklen in Folge`, date: micro.endDate }];
+            return [{ sourceId: null, detail: `${target} Wochen in Folge`, date: micro.endDate }];
           }
         } else {
           run = 0;
@@ -225,7 +225,7 @@ function streakSoul(
     },
     progress: (ctx) => {
       const streak = currentStreak(ctx);
-      return streak >= target ? null : { current: streak, target, unit: 'Zyklen' };
+      return streak >= target ? null : { current: streak, target, unit: 'Wochen' };
     },
   };
 }
@@ -439,9 +439,9 @@ export const SOUL_CATALOG: SoulDefinition[] = [
 
   {
     key: 'cycle_clean',
-    name: 'Zyklus geschlossen',
+    name: 'Woche geschlossen',
     description:
-      'Ein voller Rotationsdurchlauf ohne offene Einheit. Umgeplant zählt — nur Liegengelassenes nicht.',
+      'Eine volle Woche ohne offene Einheit. Umgeplant zählt — nur Liegengelassenes nicht.',
     rarity: 'common',
     sourceKind: 'microcycle',
     earned: (ctx) =>
@@ -528,7 +528,7 @@ export const SOUL_CATALOG: SoulDefinition[] = [
   streakSoul(
     'streak_3',
     'Drei am Stück',
-    'Drei Zyklen in Folge geschlossen. Ab hier ist es Gewohnheit, nicht mehr Motivation.',
+    'Drei Wochen in Folge geschlossen. Ab hier ist es Gewohnheit, nicht mehr Motivation.',
     'rare',
     3,
   ),
@@ -563,7 +563,7 @@ export const SOUL_CATALOG: SoulDefinition[] = [
       if (!running) return null;
       const own = ctx.microcycles.filter((m) => m.mesocycleId === running.id);
       const done = own.filter((m) => m.endDate < ctx.today).length;
-      return { current: done, target: own.length, unit: 'Zyklen' };
+      return { current: done, target: own.length, unit: 'Wochen' };
     },
   },
 
@@ -594,7 +594,7 @@ export const SOUL_CATALOG: SoulDefinition[] = [
   streakSoul(
     'streak_12',
     'Unbeirrbar',
-    'Zwölf Zyklen in Folge. Zwei Monate, in denen die Schicht dich nicht aufgehalten hat.',
+    'Zwölf Wochen in Folge. Fast drei Monate, in denen die Schicht dich nicht aufgehalten hat.',
     'legendary',
     12,
   ),
@@ -830,7 +830,7 @@ export const SOUL_CATALOG: SoulDefinition[] = [
   streakSoul(
     'streak_6',
     'Sechs am Stück',
-    'Sechs Zyklen in Folge geschlossen. Einen ganzen Monat lang keine offene Einheit.',
+    'Sechs Wochen in Folge geschlossen. Anderthalb Monate lang keine offene Einheit.',
     'rare',
     6,
   ),

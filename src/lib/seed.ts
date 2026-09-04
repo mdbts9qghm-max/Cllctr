@@ -36,6 +36,7 @@ export const ABSENCE_SHIFT_TYPES: ShiftType[] = [
     endTime: null,
     crossesMidnight: false,
     capacity: 'full',
+    kind: 'free',
     trainingWindow: 'ganzer Tag',
     color: '#14b8a6',
     note: 'Ganzer Tag frei. Zählt wie eine Freischicht — mehr freie Tage heißen aber nicht mehr Training, sondern nur, dass sich dieselben Einheiten sauberer verteilen. Der Weg pausiert an diesen Tagen: die Serie reißt nicht.',
@@ -52,6 +53,7 @@ export const ABSENCE_SHIFT_TYPES: ShiftType[] = [
     endTime: null,
     crossesMidnight: false,
     capacity: 'none',
+    kind: 'off',
     trainingWindow: null,
     color: '#a1a1aa',
     note: 'Kein Training. Geplante Einheiten an diesen Tagen entfallen ersatzlos, statt auf den nächsten Tag zu rutschen — nachholen wäre hier genau die falsche Reaktion. Sie zählen auch nicht als verpasst.',
@@ -71,9 +73,10 @@ export const DEFAULT_SHIFT_TYPES: ShiftType[] = [
     endTime: '19:00',
     crossesMidnight: false,
     capacity: 'none',
+    kind: 'day',
     trainingWindow: null,
     color: '#eab308',
-    note: '12 Stunden. Danach ist nichts mehr drin — der Tag ist ein Ruhetag.',
+    note: '12 Stunden. Kein Training: Schlaf, Regeneration, höchstens ein Spaziergang. Dafür genug essen — der Tag kostet Energie.',
     cancelsPlanned: false,
     pausesRoutines: false,
     isBuiltIn: true,
@@ -87,9 +90,10 @@ export const DEFAULT_SHIFT_TYPES: ShiftType[] = [
     endTime: '07:00',
     crossesMidnight: true,
     capacity: 'moderate',
-    trainingWindow: 'vormittags, vor der Schicht',
+    kind: 'night',
+    trainingWindow: '15:30–18:00, vor der Schicht',
     color: '#6366f1',
-    note: 'Der Vormittag vor der Schicht ist frei: normales Volumen inklusive Kraft geht, nur nichts, was den Schlaf davor frisst.',
+    note: 'Das Fenster liegt zwischen 15:30 und 18:00, danach nichts mehr. Bei hoher Erholung ist eine harte Einheit möglich, sonst mittel oder locker.',
     cancelsPlanned: false,
     pausesRoutines: false,
     isBuiltIn: true,
@@ -103,9 +107,10 @@ export const DEFAULT_SHIFT_TYPES: ShiftType[] = [
     endTime: '14:00',
     crossesMidnight: false,
     capacity: 'moderate',
-    trainingWindow: 'ab ca. 15:00',
+    kind: 'sleep',
+    trainingWindow: '16:00–19:30',
     color: '#0ea5e9',
-    note: 'Tag nach der Nachtschicht, Schlaf 08:00–14:00. Nachmittags normales Volumen, keine Key-Session.',
+    note: 'Tag nach der Nachtschicht, Hauptschlaf 08:00–14:00. In erster Linie Regenerationstag: bei hoher Erholung mittel, sonst locker oder frei.',
     cancelsPlanned: false,
     pausesRoutines: false,
     isBuiltIn: true,
@@ -119,9 +124,10 @@ export const DEFAULT_SHIFT_TYPES: ShiftType[] = [
     endTime: null,
     crossesMidnight: false,
     capacity: 'full',
+    kind: 'free',
     trainingWindow: 'ganzer Tag',
     color: '#22c55e',
-    note: 'Kompletter Tag frei. Hier liegen die Key-Sessions.',
+    note: 'Kompletter Tag frei. Hier liegen die harten Einheiten — aber nur, wenn die Erholung sie hergibt.',
     cancelsPlanned: false,
     pausesRoutines: false,
     isBuiltIn: true,
@@ -135,6 +141,7 @@ export const DEFAULT_SHIFT_TYPES: ShiftType[] = [
     endTime: '20:00',
     crossesMidnight: false,
     capacity: 'light',
+    kind: 'variable',
     trainingWindow: 'während der Schicht',
     color: '#f97316',
     note: 'Willkürlich 08:00–20:00, kann kurzfristig vor einer Tagschicht liegen. Gehört deshalb nicht in die Rotation — sie wird auf dem Schicht-Screen als Abweichung für den betroffenen Tag gesetzt. Laufen geht während der Schicht, ins Gym kommt man dabei nicht.',
@@ -189,6 +196,13 @@ const DEFAULT_DAILY_ROUTINES: Array<{ title: string; notes: string; energy: Task
  * bekommt auch eine bestehende Installation sie einmalig nachgereicht.
  */
 const ABSENCE_SHIFTS_SEEDED = 'seed.absenceShifts.v1';
+/**
+ * Markiert, dass die Schichtarten ihre Art (`kind`) und die neuen
+ * Trainingsfenster bekommen haben. Ohne die Art wüsste das Regelwerk nicht, ob
+ * ein Tag eine V-Schicht oder ein Schlaftag ist — es fiele auf die Kapazität
+ * zurück und plante gröber, als es müsste.
+ */
+const SHIFT_KINDS_SEEDED = 'seed.shiftKinds.v1';
 const DAILY_ROUTINES_SEEDED = 'seed.dailyRoutines.v1';
 
 export function defaultSettings(): Settings {
@@ -206,7 +220,7 @@ export function defaultSettings(): Settings {
     ],
     maxHr: 205,
     restHr: 49,
-    weeklyTargets: { strength: 3, run: 2, optional: 1 },
+    weeklyTargets: { strength: 2, run: 2, optional: 2, maxHardPerWeek: 3, strengthHard: 1 },
     planningProfile: 'runFirst',
     // Aus: Die V-Schicht ist die einzige Schichtart mit lockerer Kapazität, und
     // dort geht Laufen während der Schicht — aber kein Gym.
@@ -217,6 +231,10 @@ export function defaultSettings(): Settings {
     // Leer: keine Korrektur, der erste Plan fängt bei null an.
     progressionAdjust: {},
     autoUpdatePlan: true,
+    // Zwei harte Tage in Folge sind erlaubt, drei nie.
+    maxConsecutiveHardDays: 2,
+    // Mitte des brauchbaren Bereichs von 5–10 %.
+    weeklyVolumeGrowthPct: 8,
     minHoursBetweenKeySessions: 24,
     rescheduleWindowDays: 7,
     confirmRescheduleProposals: true,
@@ -258,6 +276,23 @@ export async function seedIfEmpty(): Promise<void> {
       if (existing && existing.autoUpdatePlan === undefined) {
         await db.settings.update('singleton', { autoUpdatePlan: true, updatedAt: now() });
       }
+      // Die neuen Regelgrenzen kamen mit dem Regelwerk dazu. Ohne sie stünde
+      // in `maxHardPerWeek` undefined und jede harte Einheit fiele durch die
+      // Prüfung — der Plan hätte gar keine mehr.
+      if (existing && existing.maxConsecutiveHardDays === undefined) {
+        await db.settings.update('singleton', {
+          maxConsecutiveHardDays: 2,
+          weeklyVolumeGrowthPct: 8,
+          weeklyTargets: {
+            strength: existing.weeklyTargets?.strength ?? 2,
+            run: existing.weeklyTargets?.run ?? 2,
+            optional: existing.weeklyTargets?.optional ?? 2,
+            maxHardPerWeek: existing.weeklyTargets?.maxHardPerWeek ?? 3,
+            strengthHard: existing.weeklyTargets?.strengthHard ?? 1,
+          },
+          updatedAt: now(),
+        });
+      }
       if (existing && !existing.progressionAdjust) {
         // Der frühere `progressionBase` war ein aufsummierter Zähler und wird
         // bewusst nicht übernommen: die Stufe wird jetzt aus den erledigten
@@ -276,6 +311,28 @@ export async function seedIfEmpty(): Promise<void> {
       const missing = ABSENCE_SHIFT_TYPES.filter((t) => !existing.has(t.id));
       if (missing.length > 0) await db.shiftTypes.bulkPut(missing);
       await db.meta.put({ key: ABSENCE_SHIFTS_SEEDED, value: true, updatedAt: now() });
+    }
+
+    // Art und Trainingsfenster kamen mit dem neuen Regelwerk dazu. Nachgereicht
+    // für die Standardarten; eigene Schichtarten bekommen die Art aus ihrer
+    // Kapazität und lassen sich unter Setup korrigieren.
+    if (!(await db.meta.get(SHIFT_KINDS_SEEDED))) {
+      const byId = new Map(DEFAULT_SHIFT_TYPES.map((t) => [t.id, t]));
+      const patched = (await db.shiftTypes.toArray())
+        .filter((t) => t.kind === undefined)
+        .map((t) => {
+          const std = byId.get(t.id);
+          if (std) {
+            // Name, Farbe und eigene Notizen bleiben — geändert wird nur, was
+            // die Regeln brauchen.
+            return { ...t, kind: std.kind, trainingWindow: std.trainingWindow };
+          }
+          const kind =
+            t.capacity === 'none' ? 'off' : t.capacity === 'full' ? 'free' : t.capacity === 'light' ? 'variable' : 'sleep';
+          return { ...t, kind: kind as ShiftType['kind'] };
+        });
+      if (patched.length > 0) await db.shiftTypes.bulkPut(patched);
+      await db.meta.put({ key: SHIFT_KINDS_SEEDED, value: true, updatedAt: now() });
     }
 
     // Die Marke, ob eine Schichtart den Weg pausiert, kam später dazu. Ohne sie

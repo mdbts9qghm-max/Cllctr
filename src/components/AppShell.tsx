@@ -115,7 +115,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     seedIfEmpty()
       .then(() => seedWayIfEmpty())
       .then(() => setReady(true))
-      // Seelen können auch ohne Zutun fällig werden — etwa wenn ein Zyklus zu
+      // Seelen können auch ohne Zutun fällig werden — etwa wenn eine Woche zu
       // Ende ging, während die App zu war. Einmal pro Start nachrechnen.
       .then(() => syncSouls())
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));

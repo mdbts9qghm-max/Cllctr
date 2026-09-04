@@ -12,6 +12,7 @@
  */
 
 import { addDays, dateRange, daysBetween, mod, startOfWeek } from './dates';
+import { shiftAllowance, shiftKindOf } from './rules';
 import {
   CAPACITY_RANK,
   SESSION_TYPES,
@@ -52,6 +53,7 @@ export const UNPLANNED_SHIFT: ShiftType = {
   endTime: null,
   crossesMidnight: false,
   capacity: 'none',
+  kind: 'off',
   trainingWindow: null,
   color: '#3f3f46',
   note: 'Für diesen Tag steht noch keine Schicht. Trag sie ein, dann schlägt der Plan etwas vor.',
@@ -70,6 +72,7 @@ const UNKNOWN_SHIFT: ShiftType = {
   endTime: null,
   crossesMidnight: false,
   capacity: 'full',
+  kind: 'free',
   trainingWindow: null,
   color: '#3f3f46',
   note: 'Keine Schichtart hinterlegt — der Tag wird als frei behandelt.',
@@ -276,17 +279,15 @@ export interface FeasibilityCheck {
 }
 
 /**
- * Passen die Wochenziele in die Rotation?
+ * Passen die Wochenziele zu den eingetragenen Schichten?
  *
- * Hintergrund: Key-Sessions (Intervalle, Long Run, schwere Beinarbeit) brauchen
- * einen vollen Tag. Kraft Oberkörper und lockeres Volumen kommen mit einem
- * halben Tag aus. Liefert die Rotation davon zu wenige, kann kein Generator den
- * Plan retten — dann müssen die Ziele runter.
+ * Gerechnet wird mit **mittlerer Erholung** — dem Normalfall. Bei hoher
+ * Erholung ginge mehr, bei niedriger weniger; ein Machbarkeitscheck, der vom
+ * besten Fall ausgeht, verspricht etwas, das im Alltag nie eintritt.
  *
- * Drei Ergebnisse:
- *   fits       — geht in jeder Woche auf
- *   tight      — geht in guten Wochen auf, in schwachen fehlt ein Tag
- *   impossible — geht in keiner Woche auf
+ * Gezählt werden zwei Dinge getrennt: Tage, die eine harte Einheit tragen, und
+ * Tage, an denen überhaupt Krafttraining möglich ist. Die V-Schicht ist der
+ * Grund für die Trennung — sie ist ein Trainingstag, aber keiner fürs Gym.
  */
 export function checkFeasibility(
   start: IsoDate,
@@ -297,27 +298,49 @@ export function checkFeasibility(
   const messages: string[] = [];
   const round = (n: number) => Math.round(n * 10) / 10;
 
-  // Nur die harten Laufeinheiten brauchen einen ganzen Tag. Krafttraining kommt
-  // mit einem halben aus — Schlaftag oder der Vormittag vor der Nachtschicht.
-  const needFull = targets.run;
-  const { min, max } = budget.fullDaysPerWeek;
+  const weekStart = startOfWeek(start);
+  const weeks = Math.max(1, Math.round(budget.days / 7));
+  const resolved = resolveShiftRange(weekStart, addDays(weekStart, weeks * 7 - 1), ctx);
+
+  // Bei hoher Erholung — der Tag, an dem eine harte Einheit überhaupt möglich
+  // wäre. Bei mittlerer Erholung fällt sie auf mittel zurück; das ist gewollt
+  // und kein Mangel des Schichtplans.
+  const hardCapable = (day: ResolvedShiftDay) =>
+    !day.shiftType.cancelsPlanned && shiftAllowance(shiftKindOf(day), 'high').cap === 'hard';
+  const liftCapable = (day: ResolvedShiftDay) => {
+    const a = shiftAllowance(shiftKindOf(day), 'mid');
+    return !day.shiftType.cancelsPlanned && a.cap !== null && a.disciplines.includes('strength');
+  };
+
+  const hardPerWeek: number[] = [];
+  const liftPerWeek: number[] = [];
+  for (let w = 0; w < weeks; w++) {
+    const slice = resolved.slice(w * 7, w * 7 + 7);
+    hardPerWeek.push(slice.filter(hardCapable).length);
+    liftPerWeek.push(slice.filter(liftCapable).length);
+  }
+
+  const min = Math.min(...hardPerWeek);
+  const max = Math.max(...hardPerWeek);
+  // Harte Einheiten insgesamt: harte Läufe plus die eine schwere Krafteinheit.
+  const needHard = targets.run + 1;
 
   let verdict: FeasibilityVerdict;
   let headline: string;
 
-  if (min >= needFull) {
+  if (min >= needHard) {
     verdict = 'fits';
-    headline = `Passt: jede Woche bringt mindestens ${min} volle Tage, gebraucht werden ${needFull}.`;
-  } else if (max >= needFull) {
+    headline = `Passt: jede Woche bringt mindestens ${min} Tage, die eine harte Einheit tragen — gebraucht werden ${needHard}.`;
+  } else if (max >= needHard) {
     verdict = 'tight';
     headline =
-      `Knapp: je nach Woche hast du ${min} oder ${max} volle Tage, gebraucht werden ${needFull}. ` +
-      `In den schwachen Wochen fehlt ein Tag für eine harte Laufeinheit.`;
+      `Knapp: je nach Woche hast du ${min} oder ${max} Tage für harte Einheiten, gebraucht werden ${needHard}. ` +
+      `In den schwachen Wochen fällt eine davon auf mittel zurück.`;
   } else {
     verdict = 'impossible';
     headline =
-      `Geht nicht auf: keine Woche bringt mehr als ${max} volle Tage, ` +
-      `für ${targets.run}× harte Laufeinheiten bräuchte es ${needFull}.`;
+      `Geht nicht auf: keine Woche bringt mehr als ${max} Tage für harte Einheiten, ` +
+      `für ${targets.run}× harte Ausdauer plus einen schweren Krafttag bräuchte es ${needHard}.`;
   }
 
   if (budget.cycleLength !== null && 7 % budget.cycleLength !== 0) {
@@ -329,22 +352,25 @@ export function checkFeasibility(
     );
   }
 
-  const needAtLeastModerate = targets.strength + targets.run;
-  const haveAtLeastModerate = budget.perWeek.full + budget.perWeek.moderate;
-  if (haveAtLeastModerate < needAtLeastModerate) {
+  const liftDays = liftPerWeek.reduce((a, b) => a + b, 0) / weeks;
+  if (liftDays < targets.strength) {
     messages.push(
-      `${needAtLeastModerate} feste Einheiten treffen auf ${round(haveAtLeastModerate)} Tage mit ` +
-        `mindestens normalem Volumen. Die Differenz muss auf lockere Schichttage ausweichen — ` +
-        `das geht nur mit Recovery-Läufen und Mobility.`,
+      `${targets.strength} Krafteinheiten treffen auf ${round(liftDays)} Tage pro Woche, an denen ` +
+        `Krafttraining überhaupt möglich ist. An der V-Schicht kommt man nicht ins Gym, an der ` +
+        `Tagschicht bleibt keine Zeit.`,
     );
   }
 
-  const trainableDays =
-    budget.perWeek.full + budget.perWeek.moderate + budget.perWeek.light;
-  const totalTargets = targets.strength + targets.run + targets.optional;
-  if (trainableDays < totalTargets) {
+  const trainable =
+    resolved.filter((d) => {
+      const a = shiftAllowance(shiftKindOf(d), 'mid');
+      return !d.shiftType.cancelsPlanned && a.cap !== null;
+    }).length / weeks;
+  const total = targets.strength + targets.run + targets.optional;
+  if (trainable < total) {
     messages.push(
-      `${totalTargets} geplante Einheiten treffen auf ${round(trainableDays)} trainierbare Tage pro Woche.`,
+      `${total} geplante Einheiten treffen auf ${round(trainable)} trainierbare Tage pro Woche. ` +
+        `Der Rest fällt weg — das ist gewollt: Erholung steht über dem Training.`,
     );
   }
 

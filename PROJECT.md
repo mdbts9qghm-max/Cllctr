@@ -61,45 +61,51 @@ Standardplan dadurch nicht mehr auf — sie greift nur noch, wenn eine Schichtar
 
 ## Die zentrale Architekturentscheidung
 
-**Cllctr plant auf Kapazität, nicht auf Wochentage.**
+**Cllctr plant Tag für Tag, in dieser Rangfolge: Schlaf und Erholung → Schicht → Training.**
 
 Normale Trainings-Apps verteilen Sessions auf feste Wochentage („Dienstag Intervalle").
 Bei rotierenden 12-Stunden-Schichten ist der Wochentag bedeutungslos — der Dienstag ist
-mal frei, mal Nachtschicht.
+mal frei, mal Nachtschicht. Und selbst ein freier Tag sagt noch nichts: Wer vier Stunden
+geschlafen hat, hat keinen harten Tag vor sich, egal was im Dienstplan steht.
 
-Deshalb:
+Deshalb entscheidet der Generator für **jeden einzelnen Kalendertag** in drei Schritten:
 
-1. Für jeden Kalendertag leitet die App aus der Rotation eine **Trainingskapazität** ab
-   (`none` / `light` / `moderate` / `full`).
-2. Jeder Session-Typ hat eine **Mindestkapazität** (`SESSION_TYPES` in `src/lib/types.ts`).
-   Ein Long Run braucht `full`, ein Recovery Run kommt mit `light` aus.
-3. Der Generator platziert die Wochenziele auf die Tage, die sie tragen können.
+1. **Erholung** — was der Körper hergibt (`recovery`, `sleepHours`, `sleepDebt`).
+2. **Schicht** — was der Tag hergibt (Art der Schicht, Zeitfenster, mögliche Disziplinen).
+3. **Training** — was die Woche noch braucht (Wochenziele, harte Einheiten, Volumen).
 
-Folge: `WeeklyTargets` sind **Anzahl Einheiten pro Woche**, nie Wochentage.
+Die Reihenfolge ist keine Formulierung, sondern die tatsächliche Abfolge der Prüfungen in
+`rules.dayAllowance()`. Keine Regel kann einen Tag *härter* machen, als Schicht und
+Erholung ihn zulassen — nach oben korrigiert nichts.
+
+Folge: `WeeklyTargets` sind **Anzahl Einheiten pro Woche**, nie Wochentage. Und ein
+Mikrozyklus ist eine **Kalenderwoche**, weil alle Regeln in Wochen zählen.
 
 ### Die Rotation läuft quer zur Kalenderwoche
 
 Die Rotation ist 5 Tage lang, die Woche 7. Beide decken sich erst nach 35 Tagen wieder.
 Konkret heißt das: eine Kalenderwoche enthält **2, 3 oder 4 freie Tage** — im Schnitt 2,8.
+Ein starres Wochenprogramm kann es deshalb nicht geben; der Plan muss Woche für Woche
+mitgehen. Seit der Umstellung auf Tag-für-Tag-Eingabe ist die Rotation ohnehin nur noch
+eine Vorbelegung, keine Voraussetzung.
 
-Ein starres Wochenprogramm kann es deshalb nicht geben. Und weil pro 5-Tage-Zyklus nur
-**zwei volle Tage** zur Verfügung stehen, konkurrieren dort drei Session-Typen um Platz
-(Intervalle, Long Run, Kraft Unterkörper — alle brauchen `full`). Der Generator muss sie
-über mehrere Zyklen rotieren lassen, statt sie jede Woche unterbringen zu wollen.
+### Kapazität und Schichtart
 
-### Kapazitätsstufen
+`TrainingCapacity` (`none`/`light`/`moderate`/`full`) gibt es weiterhin, aber nur noch als
+grobe Kurzfassung für Anzeige, Filter und die manuelle Auswahl im Plan. Die **Regeln**
+hängen an `ShiftType.kind`:
 
-| Stufe | Bedeutung | Erlaubte Session-Typen |
+| `kind` | Schicht | Was der Tag hergibt |
 |---|---|---|
-| `none` | Kein Training | — |
-| `light` | Kurz und locker, ≤ 45 min | Recovery Run, Kraft kurz, Mobility |
-| `moderate` | Halber Tag frei | + Lockerer Lauf, Kraft Ober- und Unterkörper, Ganzkörper |
-| `full` | Ganzer Tag frei | + Intervalle, Tempolauf, Long Run |
+| `day` | Tagschicht 07:00–19:00 | Kein Training. Schlaf, Regeneration, höchstens ein Spaziergang |
+| `night` | Nachtschicht 19:00–07:00 | Fenster 15:30–18:00 davor, danach nichts |
+| `sleep` | Schlaftag, Hauptschlaf 08:00–14:00 | Fenster 16:00–19:30, in erster Linie Regenerationstag |
+| `free` | Freischicht | Ganzer Tag — hier liegen die harten Einheiten |
+| `variable` | V-Schicht 08:00–20:00 | Nur Laufen, kurz, morgens oder abends. Kein Gym |
+| `off` | Krank und alles ohne Kapazität | Nichts |
 
-Krafttraining braucht keinen ganzen Tag: schwere Beinarbeit passt an den Schlaftag ab 15:00
-ebenso wie an den Vormittag vor der Nachtschicht. Nur die harten Laufeinheiten brauchen
-wirklich einen freien Tag. Das entzerrt den Plan deutlich — Doppeltage fielen dadurch von
-fünf auf einen pro Planungszeitraum.
+Die Marke sitzt an der Schichtart und nicht am Namen: Wer die Nachtschicht umbenennt,
+ändert nicht, wie sie geplant wird.
 
 ---
 
@@ -208,65 +214,17 @@ erzeugtes Volumen: **3,0× Kraft und 3,0× Laufen pro Woche**.
 
 ## Phase 2 — Generator und Umplaner
 
-### Planungstakt: Rotationszyklus, angezeigt in Wochen
+### Der ursprüngliche Generator — abgelöst
 
-Ein **Mikrozyklus ist ein Durchlauf der Schichtrotation** (5 Tage), keine Kalenderwoche.
-Nur so ist jeder Zyklus gleich aufgebaut. Ein Mesozyklus besteht aus 4 Belastungs- und
-1 Deload-Zyklus (25 Tage, konfigurierbar).
-
-Die Wochenziele sind auf 7 Tage bezogen, ein Zyklus dauert 5. Der Generator führt deshalb
-einen **Übertrag** zwischen den Zyklen mit: mal kommen 2, mal 3 Krafteinheiten in den
-Zyklus — im Schnitt genau 3 pro Woche. Ohne Übertrag würde jedes Mal abgerundet und das
-Volumen dauerhaft zu niedrig ausfallen.
-
-### Der Engpass: zwei volle Tage, drei harte Einheiten
-
-Pro Zyklus lassen nur zwei Tage volle Belastung zu, aber Intervalle, Long Run und Kraft
-Unterkörper wollen alle dorthin. Das **Planungsprofil** entscheidet:
-
-| Profil | Wirkung |
-|---|---|
-| `runFirst` | Laufen bekommt die freien Tage zuerst und darf beim Umplanen Kraft verdrängen |
-| `strengthFirst` | umgekehrt |
-| `balanced` | wechselt je Zyklus; beim Umplanen verdrängt niemand jemanden |
-
-Dazu kommt `allowStrengthOnLightDays`: eine kurze Krafteinheit (35 Min) an Schichttagen.
-**Ohne diese Option sinkt das Kraftvolumen von 3,1 auf 1,5 Einheiten pro Woche** — die
-Rotation gibt sonst nicht mehr her.
-
-### Platzierung in zwei Durchgängen
-
-1. **Best-Fit** — unter den möglichen Tagen gewinnt der mit der *niedrigsten* ausreichenden
-   Kapazität, damit volle Tage für das frei bleiben, was sie wirklich braucht. Sortiert wird
-   zuerst nach Kapazitätsanspruch, dann nach Profil: sonst belegt ein lockerer Lauf den
-   einzigen Schlaftag, bevor die Krafteinheit überhaupt geprüft wird.
-2. **Aufwerten** — musste ein Wunsch auf einen Ersatztyp ausweichen und ist danach doch ein
-   besserer Tag frei geblieben, zieht die Session dorthin um und bekommt ihre volle Form
-   zurück. Ohne diesen Durchgang läge eine abgespeckte Einheit am 12-Stunden-Tag, während
-   der freie Tag ungenutzt bleibt.
-
-### Belastungsregeln
-
-- **Hart ist nur Laufen.** `countsAsHardDay` ist bewusst von `load` getrennt: Krafttraining
-  ist anstrengend, blockiert den Folgetag aber nicht wie eine harte Laufeinheit. Nur
-  Intervalle, Tempolauf und Long Run zählen.
-- **Nie zwei harte Tage in Folge.** Weil Gym nicht zählt, lassen sich die beiden
-  nebeneinanderliegenden freien Tage trotzdem beide nutzen: einer bekommt den harten Lauf,
-  der andere Gym.
-- **Dieselbe Einheit nie an zwei aufeinanderfolgenden Tagen** — dieselbe Muskulatur bekäme
-  sonst keine 24 Stunden Erholung. Die Prüfung läuft über Zyklusgrenzen hinweg: der letzte
-  Tag des vorherigen Zyklus wird als eingefrorener Kontext-Slot mitgeführt.
-- **Eine Einheit pro Tag** — Ausnahme ist der Doppeltag.
-
-### Doppeltag
-
-Höchstens **einer pro Zyklus**, nur an einem Tag voller Kapazität, immer **eine Lauf- und
-eine Krafteinheit**, Laufen zuerst (mit frischen Beinen läuft es sich besser). Nie zweimal
-dieselbe Disziplin, nie im Deload.
-
-Bewusst ein Ausweg, kein Normalfall: Der Generator greift erst im dritten Durchgang darauf
-zu — für Einheiten, die sonst ganz ausfallen oder in verkürzter Form feststecken würden.
-Abschaltbar über `allowDoubleDayPerCycle`.
+> Der erste Generator plante auf **Rotationszyklen** und verteilte die Wochenziele in drei
+> Durchgängen (Best-Fit, Aufwerten, Doppeltag) auf die Tage. Er ist durch das Regelwerk
+> abgelöst worden (siehe *Phase 9*). Der Grund steht dort: Ein Verfahren, das erst alle
+> Wünsche sammelt und sie dann verteilt, kann Regeln, die am einzelnen Tag und an
+> Wochengrenzen hängen, nicht zuverlässig einhalten.
+>
+> Was aus dieser Phase geblieben ist: die Trennung von Planungslogik (`planner.ts`) und
+> Schreibzugriffen (`plan-store.ts`), der Umplaner (`replan.ts`) und die Erkenntnis, dass
+> Krafttraining keinen ganzen Tag braucht.
 
 ### Adaptives Umplanen (`replan.ts`)
 
@@ -1618,6 +1576,187 @@ leer, die Einheiten haben sich drumherum neu verteilt.
 Ohne Rotation heißt ein Zyklus **Woche** — es ist keine Rotation mehr da, auf die sich
 das Wort beziehen könnte. Die Hochrechnung *Passt das zusammen?* erscheint nur mit
 Rotation: ein Schnitt über nicht eingetragene Tage sagt nichts.
+
+---
+
+## Das Regelwerk — Schlaf, Schicht, Training, Ernährung
+
+Die bisherigen Planungsregeln sind vollständig ersetzt. Nicht angepasst: ersetzt.
+
+### Warum der alte Generator nicht reichte
+
+Er sammelte die Wochenziele als Wünsche ein und verteilte sie anschließend per Best-Fit
+auf die Tage. Solange die einzige Frage „Wie viel Zeit hat der Tag?" lautete, ging das auf.
+Die neuen Regeln fragen aber am **einzelnen Tag** nach der Erholung und zählen an
+**Wochengrenzen** (höchstens drei harte Einheiten, nie mehr als zwei harte Tage in Folge,
+Volumen plus 5–10 % gegenüber der Vorwoche). Ein Verfahren, das erst alles einsammelt und
+dann verteilt, kann keine dieser Regeln zuverlässig einhalten — es weiß beim Verteilen
+nicht mehr, in welcher Reihenfolge die Tage kommen.
+
+Der neue Generator läuft deshalb **Tag für Tag von vorn nach hinten** und führt eine
+Wochenbilanz mit. Ein Mikrozyklus ist jetzt eine Kalenderwoche.
+
+### Drei Intensitäten statt Kapazitätsstufen
+
+Jede Einheitsart trägt eine `intensity`:
+
+| | Ausdauer | Kraft |
+|---|---|---|
+| **hart** (RPE 8–10) | Intervalle, Schwellenlauf, Tempolauf, Long Run mit Endbeschleunigung | Kraft schwer, Kraft Unterkörper |
+| **mittel** (RPE 6–7) | Langer Lauf locker, Zügiger Dauerlauf, Steigerungslauf | Kraft Hypertrophie, Oberkörper, Ganzkörper |
+| **locker** (RPE 3–5) | Lockerer Lauf, Regenerationslauf, Spaziergang | Kraft kurz, Technik, Mobility |
+
+`countsAsHardDay` wird nicht mehr einzeln gepflegt, sondern aus der Intensität abgeleitet.
+Damit zählt jetzt auch **schweres Krafttraining** als harter Tag — vorher nur harte Läufe.
+
+Die alten Schlüssel bleiben im Katalog, auch wo neuere sie fachlich ablösen: Sie stehen in
+erledigten Einheiten im Logbuch, und Verlauf wird nicht umgeschrieben.
+
+### Die Matrix (`rules.ts`)
+
+Fünf Schichtarten × drei Erholungsstufen, als Tabelle geschrieben statt als verschachtelte
+Bedingungen — so ist auf einen Blick prüfbar, ob sie stimmt:
+
+| | hoch | mittel | niedrig |
+|---|---|---|---|
+| **Tagschicht** | Ruhetag | Ruhetag | Ruhetag |
+| **Nachtschicht** | hart | mittel | locker (freiwillig) |
+| **Schlaftag** | mittel | locker | Ruhetag |
+| **Freischicht** | hart | mittel | locker (freiwillig) |
+| **V-Schicht** | mittel, nur Laufen | locker, nur Laufen (freiwillig) | Ruhetag |
+
+Danach schneiden die globalen Regeln nach unten:
+
+- **Große Schlafschuld** oder **unter 5 h Schlaf** → höchstens locker.
+- **Etwas Schlafschuld** oder **unter 6,5 h Schlaf** → nichts Hartes.
+- **Drei harte Einheiten** in der Woche *oder* in den letzten 7 Tagen → nichts Hartes mehr.
+  Die zweite, rollierende Prüfung ist nötig, weil sich die Wochengrenze sonst umgehen
+  ließe: sechs harte Tage in acht, drei auf jeder Seite des Montags.
+- **Zwei harte Tage in Folge** → der dritte wird leichter.
+- **Deload-Woche** → nichts Hartes.
+
+### Erholung kommt von Hand
+
+Cllctr hat keinen Server, keinen Login und keinen Zugriff auf eine Uhr — es gibt niemanden,
+der die Erholung liefern könnte. Sie wird deshalb pro Tag eingetragen (Tabelle `readiness`,
+Primärschlüssel Datum), bewusst grob: niedrig/mittel/hoch, Schlafstunden, Schlafschuld in
+drei Stufen. Was man morgens in fünf Sekunden ehrlich beantworten kann, wird eingetragen.
+
+Für einen Tag **ohne Eintrag** gilt:
+
+- **heute und in der Vergangenheit** → `mid`. Wie es einem geht, weiß man am selben Tag;
+  wer nichts einträgt, bekommt keine harte Einheit geschenkt.
+- **in der Zukunft** → `high`. Das ist keine Annahme über den Körper, sondern über den
+  Plan: Er muss die harten Einheiten irgendwo hinlegen, sonst gibt es nie welche und die
+  Steigerung steht still. Trägt man später etwas Schlechteres ein, gibt der Plan von selbst
+  nach — das ist die Richtung, in der die Regel wirken soll.
+
+Ohne diese Unterscheidung war der erzeugte Plan über acht Wochen **komplett ohne harte
+Einheit**: Alles stand auf `mid`, und `mid` deckelt überall auf mittel.
+
+### Auswahl der Einheit
+
+Steht die erlaubte Intensität fest, entscheidet der Bedarf der Woche, welchen Platz der Tag
+füllt: harte Ausdauer, schwere Kraft, mittlere Kraft, lockerer Lauf. Die harten Läufe
+rotieren (Intervalle → Long Run → Schwelle → Tempo), damit über einen Monat jede Art
+zweimal drankommt. Dieselbe Disziplin kommt nicht zweimal hintereinander hart.
+
+**Sind die Wochenziele gedeckt, bleibt der Tag frei.** Nur direkt nach einem harten Tag
+steht noch Mobility als aktive Erholung. Ohne diese Grenze bekäme jeder Tag, an dem
+irgendetwas erlaubt ist, auch irgendetwas zugewiesen — der Plan wäre voll und „Erholung
+steht über dem Training" stünde nur im Text.
+
+### Progressive Overload mit Deckel
+
+Die Einheiten wachsen weiterhin einzeln nach ihrer eigenen Stufe (`progression.ts`, siehe
+oben). In Summe kann eine Woche dadurch einen Sprung machen, den keine der Einheiten für
+sich gerechtfertigt hätte — und genau daran gehen Läufer kaputt. Deshalb prüft
+`capWeeklyVolume()` das Wochenvolumen gegen die **letzte volle Belastungswoche**:
+
+- Wächst es um mehr als `weeklyVolumeGrowthPct` (Standard 8 %), werden Einheiten gekürzt —
+  erst die lockeren, dann die mittleren, **nie die harten**. Der harte Reiz ist der Sinn
+  der Woche; das lockere Volumen ist die Stellschraube.
+- Lag die Erholung an zwei Tagen der Woche niedrig, wird das Volumen **gehalten** statt
+  gesteigert.
+- Deload-Wochen werden nicht gedeckelt — dort ist weniger die Absicht.
+
+Bezugspunkt ist bewusst die letzte volle Belastungswoche und nicht die Vorwoche: Nach einem
+Deload ist die Rückkehr aufs alte Volumen keine Steigerung, und eine angebrochene erste
+Woche taugt als Maßstab überhaupt nicht.
+
+### Ernährung (`nutrition.ts`)
+
+Neu und bewusst **nicht gespeichert**, sondern jedes Mal aus dem Tag berechnet: Verschiebt
+sich die Einheit oder ändert sich die Schicht, stimmt eine gespeicherte Empfehlung nicht
+mehr — und eine falsche ist schlimmer als gar keine.
+
+Die App kennt weder Gewicht noch Körperfett und rechnet deshalb keine absoluten Kalorien
+aus. Was sie sagen kann, ist die Richtung — und die ist im Schichtdienst die eigentliche
+Frage:
+
+| Tag | Energie | Kohlenhydrate |
+|---|---|---|
+| hart | Erhalt bis leichter Überschuss | hoch, der Großteil um das Training |
+| mittel | Erhalt oder leichtes Defizit | moderat, um das Training herum |
+| locker / frei | leichtes Defizit möglich | niedriger, Protein und Gemüse im Vordergrund |
+
+Mit zwei Ausnahmen, die schwerer wiegen als die Tabelle: **nach einer Nachtschicht** und
+**bei großer Schlafschuld** kein Defizit. Zum Schlafmangel noch den Energiemangel zu legen,
+zieht die Erholung doppelt nach unten.
+
+Dazu die schichtspezifischen Hinweise: größere Mahlzeit 2–4 h vor der Nachtschicht, nachts
+nur kleine Snacks, Koffein nur in der ersten Schichthälfte; nach dem Hauptschlaf am
+Schlaftag die erste richtige Mahlzeit; an Tag- und V-Schichten genug Energie für zwölf
+Stunden Arbeit einpacken.
+
+### Wo das im Alltag auftaucht
+
+Eine Karte, `DayCoach`, auf dem Heute-Screen und im Tagesdetail des Plans. Sie enthält die
+drei Dinge in der Reihenfolge, in der sie zusammenhängen: **Erholung eintragen** (die
+Eingabe), **was heute geht** (die Folgerung), **Ernährung** (die zweite Folgerung). Sie auf
+drei Ecken der App zu verteilen hieße, genau den Zusammenhang zu verstecken, auf den es
+ankommt.
+
+Jede geplante Einheit trägt zusätzlich `planReason`: den Satz aus dem Regelwerk, der
+erklärt, warum an diesem Tag diese Intensität steht. `explain.ts` benutzt ihn, statt aus
+der Kapazität eine zweite Begründung zu bauen — zwei Wahrheiten zu pflegen ginge schief.
+
+### Geprüft
+
+Ein Regelwerk, das man nicht prüfen kann, ist eine Behauptung. Getestet wurde gegen die
+Spezifikation, nicht gegen die Implementierung:
+
+- Alle **18 Zellen der Matrix** (5 Schichtarten + `off` × 3 Erholungsstufen) gegen die
+  Vorgabe. V-Schicht: nie Kraft, nie hart. Tagschicht: bei keiner Erholung eine Einheit.
+- Jede globale Regel einzeln: Schlafschuld, kurze Nacht, Wochenkontingent, rollierende
+  7 Tage, harte Tage in Folge, Deload, Krankheit.
+- Katalog: `countsAsHardDay` folgt der Intensität, harte Einheiten RPE ≥ 7, lockere ≤ 5.
+- Ein **vollständiger Plan über acht Wochen** auf der echten Rotation: kein Training an
+  Tagschichten, keine Kraft an V-Schichten, nie mehr als zwei harte Tage in Folge, nie mehr
+  als drei harte Einheiten pro Woche, keine harte Einheit in einer Deload-Woche, kein Tag
+  mit zwei Einheiten, Volumenwachstum ≤ 8 % gegenüber der letzten Belastungswoche,
+  Deload-Woche unter der Belastungswoche.
+- Derselbe Plan mit durchgehend **niedriger Erholung**: nichts über locker, deutlich
+  weniger Einheiten.
+- Ernährung: harter Tag im Überschuss, Nachtschicht mit Mahlzeit- und Koffein-Hinweis,
+  Tagschicht mit Hinweisen trotz fehlender Einheit, große Schlafschuld nie im Defizit.
+
+Dazu im Browser durchgespielt: Plan erzeugt (67 Einheiten über 13 Wochen, 17 Ruhetage),
+Tagesdetails geöffnet, Erholung auf *Niedrig* gesetzt — die Regel und die
+Ernährungsempfehlung ändern sich sofort mit.
+
+### Was dabei kaputtging und repariert wurde
+
+- `createAndSavePlan()` las die Erholung **innerhalb** der Dexie-Transaktion, ohne
+  `db.readiness` im Transaktionsbereich. Dexie brach ab, der Plan wurde stumm nicht
+  erzeugt. Tabelle ergänzt.
+- Die neue Tabelle kam als **Datenbankversion 2**. Eine bestehende Datenbank steht auf
+  IndexedDB-Version 1 und bekommt ohne erhöhte Nummer kein `onupgradeneeded` — die Tabelle
+  hätte schlicht gefehlt.
+- `Long Run mit Endbeschleunigung` hatte den zügigen Schluss erst ab Stufe 4. Der Titel
+  versprach damit etwas, das die ersten vier Male nicht drinstand — und ohne ihn wäre die
+  Einheit der lange lockere Lauf, den es als eigene Art gibt. Der Schluss ist jetzt von
+  Anfang an dabei und wächst von 5 auf 15 Minuten.
 
 ---
 
