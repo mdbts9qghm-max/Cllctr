@@ -187,6 +187,10 @@ export default function PlanPage() {
     };
   });
 
+  const trained = levels.filter((l) => l.step > 0).length;
+  const topLevel = levels.reduce((best, l) => (l.step > best.step ? l : best), levels[0]);
+  const openDetail = levels.find((l) => l.type === openLevel) ?? null;
+
   /**
    * Ein Tag im Detail: Schicht, was ansteht, und die Griffe dazu.
    *
@@ -503,52 +507,79 @@ export default function PlanPage() {
       {levels.length > 0 ? (
         <Section
           title="Steigerung"
-          hint="Jede Einheitsart hat ihre eigene Stufe: so viele erledigte Einheiten dieser Art, wie es gibt. Nimmst du eine zurück, zählt sie zurück. Ein Deload lässt die Stufe stehen. Tippe eine Zeile an, um zu korrigieren."
+          hint="Jede Einheitsart hat ihre eigene Stufe: so viele erledigte Einheiten dieser Art, wie es gibt. Nimmst du eine zurück, zählt sie zurück."
         >
           <Card>
-            <ul className="space-y-1">
-              {levels.map((l) => (
-                <li key={l.type}>
-                  <button
-                    onClick={() => setOpenLevel(openLevel === l.type ? null : l.type)}
-                    className="flex w-full items-baseline justify-between gap-3 rounded py-1.5 text-left"
-                  >
-                    <span className="min-w-0">
-                      <span className="block text-sm text-ink">{l.label}</span>
-                      <span className="block truncate text-xs text-ink-faint">{l.detail}</span>
-                    </span>
-                    <span className="shrink-0 text-xs text-ink-muted tabular">Stufe {l.step}</span>
-                  </button>
+            {/* Zwölf Arten in zwölf Zeilen waren eine halbe Bildschirmseite für
+                eine Zahl, die man selten braucht. Jetzt steht der Stand als
+                Kachelfeld da; die Einzelheiten kommen erst beim Antippen. */}
+            <div className="mb-3 flex items-baseline justify-between gap-3">
+              <p className="text-sm text-ink">
+                {trained === 0
+                  ? 'Alles auf Stufe 0 — die Steigerung fängt bei der ersten erledigten Einheit an.'
+                  : `${trained} von ${levels.length} Arten angefangen`}
+              </p>
+              {trained > 0 ? (
+                <p className="shrink-0 text-xs text-ink-faint tabular">
+                  höchste: {topLevel.label} {topLevel.step}
+                </p>
+              ) : null}
+            </div>
 
-                  {openLevel === l.type ? (
-                    <div className="mb-1 mt-1 rounded border border-line bg-surface-2 p-3">
-                      <p className="mb-2 text-xs leading-relaxed text-ink-faint">
-                        Die Stufe zählt deine erledigten Einheiten. Hier lässt sie sich
-                        korrigieren — nach einem Fehleintrag oder wenn du höher einsteigen
-                        willst.
-                      </p>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Button
-                          onClick={() => void setProgressionLevel(l.type, l.step - 1)}
-                          disabled={l.step === 0}
-                        >
-                          − 1
-                        </Button>
-                        <Button onClick={() => void setProgressionLevel(l.type, l.step + 1)}>
-                          + 1
-                        </Button>
-                        <Button
-                          onClick={() => void setProgressionLevel(l.type, 0)}
-                          disabled={l.step === 0}
-                        >
-                          Auf Stufe 0
-                        </Button>
-                      </div>
-                    </div>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
+            <div className="flex flex-wrap gap-1.5">
+              {levels.map((l) => {
+                const open = openLevel === l.type;
+                return (
+                  <button
+                    key={l.type}
+                    onClick={() => setOpenLevel(open ? null : l.type)}
+                    aria-pressed={open}
+                    className={`flex items-baseline gap-1.5 rounded border px-2 py-1 text-xs ${
+                      open
+                        ? 'border-ember text-ember'
+                        : l.step > 0
+                          ? 'border-line-strong text-ink'
+                          : 'border-line text-ink-faint'
+                    }`}
+                  >
+                    <span className="max-w-[9rem] truncate">{l.label}</span>
+                    <span className="tabular font-medium">{l.step}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {openDetail ? (
+              <div className="mt-3 rounded border border-line bg-surface-2 p-3">
+                <p className="text-sm text-ink">{openDetail.label}</p>
+                <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">
+                  Stufe {openDetail.step}: {openDetail.detail}
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Button
+                    onClick={() => void setProgressionLevel(openDetail.type, openDetail.step - 1)}
+                    disabled={openDetail.step === 0}
+                  >
+                    − 1
+                  </Button>
+                  <Button
+                    onClick={() => void setProgressionLevel(openDetail.type, openDetail.step + 1)}
+                  >
+                    + 1
+                  </Button>
+                  <Button
+                    onClick={() => void setProgressionLevel(openDetail.type, 0)}
+                    disabled={openDetail.step === 0}
+                  >
+                    Auf Stufe 0
+                  </Button>
+                </div>
+                <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
+                  Korrigieren ist für Fehleinträge und für den Einstieg auf einem höheren
+                  Niveau. Ein Deload lässt die Stufe ohnehin stehen.
+                </p>
+              </div>
+            ) : null}
           </Card>
         </Section>
       ) : null}

@@ -15,6 +15,7 @@ import {
   type IsoDate,
   type Recurrence,
   type ResolvedShiftDay,
+  type Recovery,
   type Session,
   type Task,
   type TaskEnergy,
@@ -54,6 +55,11 @@ export interface TaskEnergyBudget {
 export function taskEnergyBudget(
   day: ResolvedShiftDay,
   sessionsToday: Session[],
+  /**
+   * Der Erholungszustand des Tages. Ohne Angabe zählt nur die Schicht — dann
+   * verhält sich die Funktion wie vorher.
+   */
+  recovery: Recovery = 'mid',
 ): TaskEnergyBudget {
   const active = sessionsToday.filter((s) => s.status === 'planned' || s.status === 'done');
   const hardSession = active.find((s) => SESSION_TYPES[s.type].countsAsHardDay);
@@ -73,10 +79,21 @@ export function taskEnergyBudget(
   let allowed = baseEnergy(day);
   if (heavy && allowed.length > 1) allowed = allowed.slice(0, -1);
 
+  /**
+   * Schlechte Erholung kostet den Haushalt genauso wie das Training.
+   *
+   * Ohne diese Kürzung schlüge die App an einem Tag mit 24 % Recovery weiter
+   * den Großputz vor, während sie zwei Zeilen darüber das Training auf locker
+   * heruntersetzt — sie widerspräche sich selbst auf demselben Bildschirm.
+   */
+  if (recovery === 'low' && allowed.length > 1) allowed = ['light'];
+
   const window = day.shiftType.trainingWindow ? `, ${day.shiftType.trainingWindow}` : '';
   let reason: string;
 
-  if (day.capacity === 'full' && !heavy) {
+  if (recovery === 'low') {
+    reason = `${day.shiftType.name}, aber die Erholung ist niedrig — heute nur, was nebenbei geht.`;
+  } else if (day.capacity === 'full' && !heavy) {
     reason = `${day.shiftType.name} — der ganze Tag gehört dir. Auch etwas Anstrengendes ist drin.`;
   } else if (day.capacity === 'full' && heavy) {
     const what = hardSession ? hardSession.title : 'die heutige Einheit';

@@ -8,6 +8,7 @@ import { addDays, formatShort, today, weekdayShort } from '@/lib/dates';
 import { useSettings, useShiftContext } from '@/lib/hooks';
 import { capacityAllows, resolveShiftDay, resolveShiftRange } from '@/lib/shifts';
 import { blockStatus, explainRestDay, explainSession } from '@/lib/explain';
+import { recoveryOf } from '@/lib/readiness';
 import {
   applyRescheduleProposal,
   buildRescheduleProposal,
@@ -63,7 +64,12 @@ export default function HeutePage() {
     const hasPlan = (await db.macrocycles.count()) > 0;
     const tasks = await db.tasks.where('status').equals('open').toArray();
     const souls = await db.souls.orderBy('collectedAt').reverse().limit(3).toArray();
+    const readiness = await db.readiness
+      .where('date')
+      .between(addDays(todayIso, -8), addDays(todayIso, LOOKAHEAD_DAYS), true, true)
+      .toArray();
     return {
+      readiness,
       sessions,
       openBefore: openBefore
         .filter((s) => s.status === 'planned')
@@ -135,7 +141,13 @@ export default function HeutePage() {
     cancelledToday,
   );
 
-  const budget = taskEnergyBudget(day, todaySessions);
+  // Die Erholung zählt auch für den Haushalt: Sonst stünde an einem Tag mit
+  // 24 % Recovery weiter der Großputz auf der Liste.
+  const budget = taskEnergyBudget(
+    day,
+    todaySessions,
+    recoveryOf(data.readiness.find((r) => r.date === todayIso)),
+  );
   const todayAppointments: Task[] = appointmentsOn(data.tasks, todayIso);
   const dailies = dailyTasks(data.tasks, todayIso);
   const suggested = suggestTasks(data.tasks, budget, todayIso);

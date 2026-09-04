@@ -14,7 +14,8 @@ import { db } from '@/lib/db';
 import { today } from '@/lib/dates';
 import { explainDay, hardContextFor } from '@/lib/planner';
 import { nutritionFor } from '@/lib/nutrition';
-import { setReadiness, clearReadiness } from '@/lib/readiness';
+import { setReadiness, setWhoop, clearReadiness, isFromWhoop } from '@/lib/readiness';
+import { useState } from 'react';
 import {
   INTENSITY_LABEL,
   INTENSITY_RPE,
@@ -26,10 +27,35 @@ import {
   type SessionTypeKey,
   type Settings,
   type SleepDebt,
+  type WhoopEntry,
 } from '@/lib/types';
 
 const RECOVERIES: Recovery[] = ['low', 'mid', 'high'];
 const DEBTS: SleepDebt[] = ['none', 'some', 'high'];
+
+/**
+ * Die Felder der WHOOP-Karte, in der Reihenfolge, in der die Zahlen morgens auf
+ * dem Bildschirm stehen. Die ersten drei steuern die Planung, die letzten drei
+ * sind Verlauf — deshalb liegen sie hinter dem Aufklapper.
+ */
+const WHOOP_FIELDS: Array<{
+  key: keyof WhoopEntry;
+  label: string;
+  unit: string;
+  step: string;
+  max: number;
+  extra?: boolean;
+}> = [
+  { key: 'recoveryPct', label: 'Recovery', unit: '%', step: '1', max: 100 },
+  { key: 'sleepHours', label: 'Schlaf', unit: 'h', step: '0.25', max: 14 },
+  { key: 'sleepDebtHours', label: 'Sleep Debt', unit: 'h', step: '0.25', max: 20 },
+  { key: 'strain', label: 'Day Strain', unit: '', step: '0.1', max: 21, extra: true },
+  { key: 'hrvMs', label: 'HRV', unit: 'ms', step: '1', max: 300, extra: true },
+  { key: 'restingHr', label: 'Ruhepuls', unit: 'bpm', step: '1', max: 120, extra: true },
+];
+
+const numberInput =
+  'w-full rounded border border-line-strong bg-surface-2 px-2 py-1.5 text-sm text-ink tabular outline-none focus:border-ember';
 
 export function DayCoach({
   day,
@@ -51,6 +77,7 @@ export function DayCoach({
   // "mittel" —, deshalb wird hier nicht auf das Laden gewartet.
   const readiness = useLiveQuery(() => db.readiness.get(day.date), [day.date]);
 
+  const [showExtra, setShowExtra] = useState(false);
   const todayIso = today();
   const hard = hardContextFor(day.date, allSessions);
   const { ctx, allowance } = explainDay(
@@ -67,6 +94,8 @@ export function DayCoach({
     sessions.filter((s) => s.status !== 'skipped').map((s) => s.type),
   );
   const entered = readiness !== undefined && readiness !== null;
+  const whoop = readiness?.whoop ?? null;
+  const fromWhoop = isFromWhoop(readiness ?? undefined);
 
   return (
     <div className="space-y-3">
@@ -90,61 +119,77 @@ export function DayCoach({
           )}
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          {RECOVERIES.map((r) => (
-            <button
-              key={r}
-              onClick={() => void setReadiness(day.date, { recovery: r })}
-              aria-pressed={entered && readiness?.recovery === r}
-              className={`rounded border px-2.5 py-1 text-sm ${
-                entered && readiness?.recovery === r
-                  ? 'border-ember text-ember'
-                  : 'border-line-strong text-ink hover:border-ember'
-              }`}
-            >
-              {RECOVERY_LABEL[r]}
-            </button>
+        {/* Die drei Zahlen von der Uhr. Sie stehen zuerst, weil sie im Alltag
+            die eigentliche Eingabe sind — die Einschätzung darunter ist der
+            Ausweg für Tage ohne Uhr oder für einen Wert, der nicht passt. */}
+        <div className="grid grid-cols-3 gap-2">
+          {WHOOP_FIELDS.filter((f) => !f.extra || showExtra).map((f) => (
+            <label key={f.key} className="block">
+              <span className="mb-1 block truncate text-[11px] uppercase tracking-widest text-ink-faint">
+                {f.label}
+                {f.unit ? ` (${f.unit})` : ''}
+              </span>
+              <input
+                type="number"
+                inputMode="decimal"
+                step={f.step}
+                min={0}
+                max={f.max}
+                placeholder="–"
+                value={whoop?.[f.key] ?? ''}
+                onChange={(e) => {
+                  const raw = e.target.value.trim();
+                  void setWhoop(day.date, {
+                    [f.key]: raw === '' ? null : Math.max(0, Math.min(f.max, Number(raw) || 0)),
+                  });
+                }}
+                className={numberInput}
+              />
+            </label>
           ))}
         </div>
 
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          <label className="block">
-            <span className="mb-1 block text-[11px] uppercase tracking-widest text-ink-faint">
-              Schlaf (h)
-            </span>
-            <input
-              type="number"
-              inputMode="decimal"
-              step="0.5"
-              min={0}
-              max={14}
-              value={readiness?.sleepHours ?? ''}
-              placeholder="–"
-              onChange={(e) => {
-                const raw = e.target.value.trim();
-                void setReadiness(day.date, {
-                  sleepHours: raw === '' ? null : Math.max(0, Math.min(14, Number(raw) || 0)),
-                });
-              }}
-              className="w-full rounded border border-line-strong bg-surface-2 px-2 py-1.5 text-sm text-ink tabular outline-none focus:border-ember"
-            />
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-[11px] uppercase tracking-widest text-ink-faint">
-              Schlafschuld
-            </span>
+        <button
+          onClick={() => setShowExtra((v) => !v)}
+          className="mt-2 text-[11px] text-ink-faint underline decoration-dotted hover:text-ink"
+        >
+          {showExtra ? 'Weniger' : 'Strain, HRV, Ruhepuls'}
+        </button>
+
+        <div className="mt-3 border-t border-line pt-3">
+          <p className="mb-2 text-[11px] text-ink-faint">
+            {fromWhoop
+              ? `Aus WHOOP übernommen: ${whoop?.recoveryPct} % — das ist ${RECOVERY_LABEL[readiness!.recovery].toLowerCase()}. Antippen überschreibt.`
+              : 'Ohne Uhr: selbst einschätzen.'}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {RECOVERIES.map((r) => (
+              <button
+                key={r}
+                onClick={() => void setReadiness(day.date, { recovery: r })}
+                aria-pressed={entered && readiness?.recovery === r}
+                className={`rounded border px-2.5 py-1 text-sm ${
+                  entered && readiness?.recovery === r
+                    ? 'border-ember text-ember'
+                    : 'border-line-strong text-ink hover:border-ember'
+                }`}
+              >
+                {RECOVERY_LABEL[r]}
+              </button>
+            ))}
             <select
               value={readiness?.sleepDebt ?? 'none'}
               onChange={(e) => void setReadiness(day.date, { sleepDebt: e.target.value as SleepDebt })}
-              className="w-full rounded border border-line-strong bg-surface-2 px-2 py-1.5 text-sm text-ink outline-none focus:border-ember"
+              className="rounded border border-line-strong bg-surface-2 px-2 py-1 text-sm text-ink outline-none focus:border-ember"
+              aria-label="Schlafschuld"
             >
               {DEBTS.map((d) => (
                 <option key={d} value={d}>
-                  {SLEEP_DEBT_LABEL[d]}
+                  Schuld: {SLEEP_DEBT_LABEL[d]}
                 </option>
               ))}
             </select>
-          </label>
+          </div>
         </div>
       </div>
 

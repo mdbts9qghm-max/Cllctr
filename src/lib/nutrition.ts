@@ -166,7 +166,9 @@ function timingFor(
     ];
   }
 
-  const at = window ? ` (${window})` : '';
+  // "Vor der Einheit (ganzer Tag)" wäre keine Zeitangabe, sondern ein Witz —
+  // an freien Tagen bleibt der Zusatz deshalb weg.
+  const at = window && window !== 'ganzer Tag' ? ` (${window})` : '';
   const pre =
     intensity === 'hard'
       ? '2–3 Stunden davor eine kohlenhydratbetonte Mahlzeit, 30–60 Min davor bei Bedarf eine kleine schnelle Portion.'

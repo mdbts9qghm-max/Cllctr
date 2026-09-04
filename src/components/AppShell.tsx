@@ -5,10 +5,11 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
-import { today } from '@/lib/dates';
+import { addDays, today } from '@/lib/dates';
 import { useSettings, useShiftContext } from '@/lib/hooks';
 import { planFingerprint } from '@/lib/planner';
-import { syncPlan } from '@/lib/plan-store';
+import { PLAN_WEEKS, syncPlan } from '@/lib/plan-store';
+import { readinessRange } from '@/lib/readiness';
 import { seedIfEmpty } from '@/lib/seed';
 import { seedWayIfEmpty } from '@/lib/way-store';
 import { syncSouls } from '@/lib/soul-store';
@@ -22,7 +23,7 @@ const TABS = [
   { href: '/', label: 'Heute', icon: IconToday },
   { href: '/plan', label: 'Plan', icon: IconPlan },
   { href: '/aufgaben', label: 'Aufgaben', icon: IconTasks },
-  { href: '/statistik', label: 'Statistik', icon: IconStats },
+  { href: '/ernaehrung', label: 'Ernährung', icon: IconFood },
   { href: '/seelen', label: 'Seelen', icon: IconSoul },
 ];
 
@@ -54,11 +55,17 @@ function IconTasks({ active }: { active: boolean }) {
   );
 }
 
-function IconStats({ active }: { active: boolean }) {
+/**
+ * Gabel und Löffel. Bewusst kein Teller mit Tortenstück — die Ernährung ist
+ * hier kein Zähler, sondern eine Richtung für den Tag.
+ */
+function IconFood({ active }: { active: boolean }) {
   return (
-    <svg viewBox="0 0 20 20" className="size-5" fill="none" strokeWidth="1.6" stroke="currentColor" strokeLinecap="round">
-      <path d="M3 16.5h14" />
-      <path d={active ? 'M6 12v3M10 6.5v8.5M14 9.5v5.5' : 'M6 12.5v2.5M10 8.5v6.5M14 11v4'} strokeWidth="2.2" />
+    <svg viewBox="0 0 20 20" className="size-5" fill="none" strokeWidth="1.6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 3v5.5a1.6 1.6 0 003.2 0V3" />
+      <path d="M6.6 8.5V17" />
+      <path d={active ? 'M13.4 3c1.6 0 2.6 2 2.6 4.2s-1 3.3-2.6 3.3z' : 'M13.4 3c1.6 0 2.6 2 2.6 4.2s-1 3.3-2.6 3.3'} fill={active ? 'currentColor' : 'none'} />
+      <path d="M13.4 10.5V17" />
     </svg>
   );
 }
@@ -108,7 +115,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (!ctx || !settings) return undefined;
     const macro = (await db.macrocycles.toArray()).find((m) => m.active);
     if (!macro) return null;
-    return planFingerprint(ctx, settings, today());
+    const from = today();
+    // Die Erholung wird hier **gelesen**, damit Dexie die Tabelle beobachtet.
+    // Ohne diesen Zugriff bliebe der Fingerabdruck gleich, wenn man morgens die
+    // Werte von der Uhr einträgt — und der Plan stünde weiter auf einer
+    // Erholung, die es nicht mehr gibt.
+    const readiness = await readinessRange(from, addDays(from, PLAN_WEEKS * 7));
+    return planFingerprint(ctx, settings, from, readiness);
   }, [ctx, settings]);
 
   useEffect(() => {
@@ -122,8 +135,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   /**
-   * Hat sich an Schichten, Rotation oder Zielen etwas geändert, zieht der Plan
-   * nach. Läuft nur, wenn der Fingerabdruck sich tatsächlich bewegt hat — sonst
+   * Hat sich an Schichten, Erholung, Rotation oder Zielen etwas geändert, zieht
+   * der Plan nach. Läuft nur, wenn der Fingerabdruck sich tatsächlich bewegt hat — sonst
    * würde jede Navigation den Plan neu bauen.
    */
   useEffect(() => {
@@ -134,7 +147,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         if (cancelled || !result) return;
         setPlanNotice(
           result.changed === 0
-            ? 'Plan an deine Schichten angepasst — es blieb alles, wie es war.'
+            ? 'Plan an Schichten und Erholung angepasst — es blieb alles, wie es war.'
             : `Plan angepasst: an ${result.changed} ${
                 result.changed === 1 ? 'Tag' : 'Tagen'
               } liegt jetzt etwas anderes.`,

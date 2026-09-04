@@ -12,7 +12,7 @@ export type IsoDate = string;
 export type IsoDateTime = string;
 
 /** Version des Schemas im Export. Wird bei jeder Änderung am Modell hochgezählt. */
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 
 /* ------------------------------------------------------------------ */
 /* Schicht                                                             */
@@ -129,6 +129,32 @@ export const DEFAULT_RECOVERY: Recovery = 'mid';
 export const DEFAULT_SLEEP_DEBT: SleepDebt = 'none';
 
 /**
+ * WHOOPs Recovery-Prozent in die drei Stufen der Planung.
+ *
+ * Die Grenzen sind nicht erfunden, sondern WHOOPs eigene Farbbereiche: rot bis
+ * 33, gelb bis 66, grün darüber. Eigene Schwellen zu setzen hieße, der Zahl auf
+ * dem Handgelenk zu widersprechen — und dann stünde in der App etwas anderes
+ * als auf der Uhr.
+ */
+export function recoveryFromWhoop(pct: number): Recovery {
+  if (pct <= 33) return 'low';
+  if (pct <= 66) return 'mid';
+  return 'high';
+}
+
+/**
+ * WHOOPs Sleep Debt in Stunden in die drei Stufen.
+ *
+ * Unter einer Stunde ist Rauschen. Ab drei Stunden fehlt eine halbe Nacht —
+ * das ist der Punkt, ab dem die Regeln hartes Training ausschließen.
+ */
+export function sleepDebtFromHours(hours: number): SleepDebt {
+  if (hours < 1) return 'none';
+  if (hours < 3) return 'some';
+  return 'high';
+}
+
+/**
  * Was an einem Tag über Schlaf und Erholung bekannt ist.
  *
  * Pro Tag höchstens ein Datensatz, Primärschlüssel ist das Datum. Fehlt er,
@@ -141,9 +167,40 @@ export interface DayReadiness {
   /** Schlafdauer der letzten Nacht in Stunden, null wenn nicht eingetragen. */
   sleepHours: number | null;
   sleepDebt: SleepDebt;
+  /**
+   * Die Zahlen, wie sie auf der Uhr stehen.
+   *
+   * Roh gespeichert und nicht nur als abgeleitete Stufe: Die Stufe ist eine
+   * Vereinfachung für die Planung, aber 68 % und 34 % sind beide "mittel bis
+   * hoch" und erzählen doch Verschiedenes. Wer die Rohwerte behält, kann später
+   * anders auswerten; wer nur die Stufe behält, hat die Zahl für immer verloren.
+   */
+  whoop: WhoopEntry | null;
   note: string;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
+}
+
+/**
+ * Ein Tageseintrag aus WHOOP, von Hand übertragen.
+ *
+ * Es gibt keine Schnittstelle: Cllctr hat keinen Server und keine API-Schlüssel,
+ * das ist der Kern des Projekts. Übertragen werden deshalb die vier Zahlen, die
+ * morgens ohnehin auf dem Bildschirm stehen — mehr braucht die Planung nicht.
+ */
+export interface WhoopEntry {
+  /** Recovery in Prozent, 0–100. WHOOPs eigene Farbgrenzen: rot ≤33, gelb ≤66, grün darüber. */
+  recoveryPct: number | null;
+  /** Schlafdauer in Stunden. */
+  sleepHours: number | null;
+  /** Sleep Debt in Stunden, wie WHOOP sie ausweist. */
+  sleepDebtHours: number | null;
+  /** Day Strain 0–21. Nur Verlauf, die Planung nutzt ihn nicht. */
+  strain: number | null;
+  /** Herzfrequenzvariabilität in Millisekunden. */
+  hrvMs: number | null;
+  /** Ruhepuls. */
+  restingHr: number | null;
 }
 
 /**

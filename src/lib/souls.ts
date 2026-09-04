@@ -14,12 +14,15 @@
  *      sie regelkonform umgeplant wurde. Wer ein Leben hat, verliert hier nichts.
  */
 
-import { daysBetween } from './dates';
+import { addDays, daysBetween, startOfWeek } from './dates';
 import { PROGRESSING_TYPES, progresses } from './progression';
+import { shiftAllowance } from './rules';
+import { isEmptyWhoop } from './readiness';
 import { resolveShiftDay, type ShiftContext } from './shifts';
 import { isDaily, routineDays, routineFamily } from './tasks';
 import {
   SESSION_TYPES,
+  type DayReadiness,
   type IsoDate,
   type Mesocycle,
   type Microcycle,
@@ -36,6 +39,8 @@ import {
 export interface SoulContext {
   sessions: Session[];
   logs: SessionLog[];
+  /** Erholungseinträge. Ohne sie ließe sich nicht belohnen, dass man hinhört. */
+  readiness: DayReadiness[];
   microcycles: Microcycle[];
   mesocycles: Mesocycle[];
   records: PersonalRecord[];
@@ -94,11 +99,93 @@ function earnedLevels(ctx: SoulContext): Partial<Record<SessionTypeKey, number>>
   return out;
 }
 
-/** Schichtarten, an denen überhaupt trainiert werden kann — echte Schichten. */
+/**
+ * Schichtarten, an denen überhaupt trainiert werden kann — echte Schichten.
+ *
+ * Gefragt wird das Regelwerk, nicht die Kapazität: Ob an einer Schicht etwas
+ * geht, entscheidet seit dem Regelwerk `rules.ts`. Die Tagschicht hat formal
+ * eine Kapazität, trägt aber nie eine Einheit — sie hier mitzuzählen hieße,
+ * eine Seele zu verlangen, die niemand einsammeln kann.
+ */
 function trainableShifts(ctx: SoulContext) {
-  return ctx.shiftContext.shiftTypes.filter(
-    (t) => t.capacity !== 'none' && !t.cancelsPlanned && t.startTime !== null,
-  );
+  return ctx.shiftContext.shiftTypes.filter((t) => {
+    if (t.cancelsPlanned || t.startTime === null) return false;
+    return shiftAllowance(t.kind ?? 'off', 'high').cap !== null;
+  });
+}
+
+/**
+ * Die Arten, um die der Generator den Plan baut.
+ *
+ * Der Katalog kennt achtzehn Einheitsarten, aber nur diese sechs kommen
+ * regelmäßig dran — die vier harten Läufe im Wechsel, der schwere Krafttag und
+ * die mittlere Krafteinheit. Eine Seele über *alle* steigernden Arten wäre nach
+ * der Katalogerweiterung unerreichbar geworden, ohne dass jemand etwas falsch
+ * gemacht hätte.
+ */
+const CORE_TYPES: SessionTypeKey[] = [
+  'run_intervals',
+  'run_threshold',
+  'run_tempo',
+  'run_long',
+  'strength_heavy',
+  'strength_hypertrophy',
+];
+
+/**
+ * Tage, an denen die Erholung niedrig war und trotzdem nichts Hartes lief.
+ *
+ * Bewusst nur Tage, an denen überhaupt etwas passiert ist oder etwas geplant
+ * war: Ein Urlaubstag ohne Training ist kein Verzicht, sondern Urlaub.
+ */
+function lowRecoveryRespected(ctx: SoulContext): IsoDate[] {
+  const doneByDate = new Map<IsoDate, Session[]>();
+  for (const { session } of completedLogs(ctx)) {
+    doneByDate.set(session.date, [...(doneByDate.get(session.date) ?? []), session]);
+  }
+
+  return ctx.readiness
+    .filter((r) => r.recovery === 'low' && r.date <= ctx.today)
+    .filter((r) => {
+      const own = doneByDate.get(r.date) ?? [];
+      if (own.some((s) => SESSION_TYPES[s.type].countsAsHardDay)) return false;
+      // Entweder locker trainiert oder bewusst pausiert — beides zählt, aber es
+      // muss an dem Tag etwas geplant gewesen sein.
+      return own.length > 0 || ctx.sessions.some((s) => s.date === r.date);
+    })
+    .map((r) => r.date)
+    .sort();
+}
+
+/** Tage mit übertragenen WHOOP-Werten. */
+function whoopDays(ctx: SoulContext): IsoDate[] {
+  return ctx.readiness
+    .filter((r) => !isEmptyWhoop(r.whoop))
+    .map((r) => r.date)
+    .sort();
+}
+
+/** Kalenderwochen mit den Einheiten, die in ihnen erledigt wurden. */
+function doneByWeek(ctx: SoulContext): Map<IsoDate, Session[]> {
+  const out = new Map<IsoDate, Session[]>();
+  for (const { session } of completedLogs(ctx)) {
+    const week = startOfWeek(session.date);
+    out.set(week, [...(out.get(week) ?? []), session]);
+  }
+  return out;
+}
+
+/** Zählt Tage in Folge, an denen etwas eingetragen wurde — bis heute zurück. */
+function entryStreak(dates: Set<IsoDate>, today: IsoDate): { length: number; start: IsoDate } {
+  // Heute darf noch fehlen: Wer abends einträgt, hätte sonst tagsüber eine
+  // gerissene Serie, obwohl nichts passiert ist.
+  let cursor = dates.has(today) ? today : addDays(today, -1);
+  let length = 0;
+  while (dates.has(cursor)) {
+    length++;
+    cursor = addDays(cursor, -1);
+  }
+  return { length, start: addDays(cursor, 1) };
 }
 
 function totalMinutes(ctx: SoulContext): number {
@@ -483,25 +570,109 @@ export const SOUL_CATALOG: SoulDefinition[] = [
   ),
 
   {
-    key: 'double_day',
-    name: 'Doppelt genommen',
-    description: 'Laufen und Kraft an einem Tag — beides erledigt, nicht nur geplant.',
+    key: 'listened',
+    name: 'Hingehört',
+    description:
+      'Fünfmal an einem Tag mit niedriger Erholung nichts Hartes trainiert. Die schwerste Übung im Hybridtraining ist, es sein zu lassen.',
     rarity: 'rare',
-    sourceKind: 'manual',
+    sourceKind: 'streak',
     earned: (ctx) => {
-      const byDate = new Map<IsoDate, Session[]>();
-      for (const { session } of completedLogs(ctx)) {
-        const list = byDate.get(session.date) ?? [];
-        list.push(session);
-        byDate.set(session.date, list);
+      const days = lowRecoveryRespected(ctx);
+      if (days.length < 5) return [];
+      return [{ sourceId: null, detail: `${days.length} Tage`, date: days[4] }];
+    },
+    progress: (ctx) => {
+      const current = lowRecoveryRespected(ctx).length;
+      return current >= 5 ? null : { current, target: 5, unit: 'Tage' };
+    },
+  },
+
+  {
+    key: 'recovery_week',
+    name: 'Sieben Tage gemessen',
+    description:
+      'Eine Woche am Stück die Erholung eingetragen. Ohne diese Zahl plant die App ins Blaue — mit ihr plant sie deinen Körper.',
+    rarity: 'common',
+    sourceKind: 'streak',
+    earned: (ctx) => {
+      const dates = new Set(ctx.readiness.map((r) => r.date));
+      const streak = entryStreak(dates, ctx.today);
+      if (streak.length < 7) return [];
+      return [{ sourceId: null, detail: `${streak.length} Tage in Folge`, date: ctx.today }];
+    },
+    progress: (ctx) => {
+      const dates = new Set(ctx.readiness.map((r) => r.date));
+      const streak = entryStreak(dates, ctx.today);
+      return streak.length >= 7 ? null : { current: streak.length, target: 7, unit: 'Tage' };
+    },
+  },
+
+  {
+    key: 'whoop_month',
+    name: 'Vier Wochen Daten',
+    description:
+      'An 28 Tagen die Werte von der Uhr übertragen. Kein Automatismus hat das gemacht — du hast sie jeden Morgen eingetippt.',
+    rarity: 'rare',
+    sourceKind: 'streak',
+    earned: (ctx) => {
+      const days = whoopDays(ctx);
+      if (days.length < 28) return [];
+      return [{ sourceId: null, detail: `${days.length} Tage`, date: days[27] }];
+    },
+    progress: (ctx) => {
+      const current = whoopDays(ctx).length;
+      return current >= 28 ? null : { current, target: 28, unit: 'Tage' };
+    },
+  },
+
+  {
+    key: 'hybrid_week',
+    name: 'Beide Seiten',
+    description:
+      'In einer Woche eine harte Laufeinheit und einen schweren Krafttag erledigt. Genau das ist Hybrid — nicht abwechselnd, sondern beides.',
+    rarity: 'common',
+    sourceKind: 'microcycle',
+    earned: (ctx) => {
+      const out: Array<{ sourceId: string | null; detail: string; date: IsoDate }> = [];
+      for (const [week, list] of doneByWeek(ctx)) {
+        const hardRun = list.find(
+          (x) => SESSION_TYPES[x.type].discipline === 'run' && SESSION_TYPES[x.type].countsAsHardDay,
+        );
+        const hardLift = list.find(
+          (x) =>
+            SESSION_TYPES[x.type].discipline === 'strength' && SESSION_TYPES[x.type].countsAsHardDay,
+        );
+        if (!hardRun || !hardLift) continue;
+        out.push({
+          sourceId: week,
+          detail: `${hardRun.title} + ${hardLift.title}`,
+          date: [hardRun.date, hardLift.date].sort().slice(-1)[0],
+        });
       }
-      return [...byDate.entries()]
-        .filter(([, list]) => list.length >= 2 && new Set(list.map((s) => s.discipline)).size >= 2)
-        .map(([date, list]) => ({
-          sourceId: date,
-          detail: list.map((s) => s.title).join(' + '),
-          date,
-        }));
+      return out;
+    },
+  },
+
+  {
+    key: 'three_hard_week',
+    name: 'Ausgereizt, nicht überzogen',
+    description:
+      'Drei harte Einheiten in einer Woche erledigt — genau das Maximum, keine vierte. Die Grenze zu treffen ist schwerer, als sie zu überschreiten.',
+    rarity: 'rare',
+    sourceKind: 'microcycle',
+    earned: (ctx) => {
+      const out: Array<{ sourceId: string | null; detail: string; date: IsoDate }> = [];
+      for (const [week, list] of doneByWeek(ctx)) {
+        const hard = list.filter((x) => SESSION_TYPES[x.type].countsAsHardDay);
+        // Genau drei: Mehr wäre gegen die Regel geplant und deshalb kein Erfolg.
+        if (hard.length !== 3) continue;
+        out.push({
+          sourceId: week,
+          detail: hard.map((x) => x.title).join(', '),
+          date: hard.map((x) => x.date).sort().slice(-1)[0],
+        });
+      }
+      return out;
     },
   },
 
@@ -632,11 +803,13 @@ export const SOUL_CATALOG: SoulDefinition[] = [
     rarity: 'common',
     sourceKind: 'manual',
     earned: (ctx) => {
+      // Nur Einheiten, die locker gemeint waren. Der Long Run trägt seit dem
+      // Regelwerk eine Endbeschleunigung und zählt als hart — RPE 4 wäre dort
+      // kein Zeichen von Disziplin, sondern von einer verpassten Einheit.
       const hit = completedLogs(ctx).find(
         (x) =>
-          (x.session.type === 'run_easy' ||
-            x.session.type === 'run_long' ||
-            x.session.type === 'run_recovery') &&
+          SESSION_TYPES[x.session.type].discipline === 'run' &&
+          SESSION_TYPES[x.session.type].intensity === 'easy' &&
           x.log.rpe !== null &&
           x.log.rpe <= 4,
       );
@@ -851,20 +1024,20 @@ export const SOUL_CATALOG: SoulDefinition[] = [
     key: 'level_all_5',
     name: 'Auf breiter Front',
     description:
-      'Jede steigernde Einheitsart mindestens auf Stufe 5. Kein Lieblingstraining, keine Lücke.',
+      'Alle sechs Kernarten mindestens auf Stufe 5: Intervalle, Schwelle, Tempo, Long Run, schwere und mittlere Kraft. Kein Lieblingstraining, keine Lücke.',
     rarity: 'legendary',
     sourceKind: 'streak',
     earned: (ctx) => {
       const levels = earnedLevels(ctx);
-      if (PROGRESSING_TYPES.some((t) => (levels[t] ?? 0) < 5)) return [];
-      return [{ sourceId: null, detail: 'Alle Arten auf Stufe 5', date: ctx.today }];
+      if (CORE_TYPES.some((t) => (levels[t] ?? 0) < 5)) return [];
+      return [{ sourceId: null, detail: 'Alle Kernarten auf Stufe 5', date: ctx.today }];
     },
     progress: (ctx) => {
       const levels = earnedLevels(ctx);
-      const current = PROGRESSING_TYPES.filter((t) => (levels[t] ?? 0) >= 5).length;
-      return current >= PROGRESSING_TYPES.length
+      const current = CORE_TYPES.filter((t) => (levels[t] ?? 0) >= 5).length;
+      return current >= CORE_TYPES.length
         ? null
-        : { current, target: PROGRESSING_TYPES.length, unit: 'Arten' };
+        : { current, target: CORE_TYPES.length, unit: 'Arten' };
     },
   },
 

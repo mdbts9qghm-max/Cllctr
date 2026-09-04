@@ -403,7 +403,7 @@ export interface QuickLog {
  * Hakt eine Einheit ab und schreibt zugleich das Protokoll.
  *
  * Beides zusammen, weil ein "erledigt" ohne RPE die Information verliert, aus
- * der später die Deload-Erkennung und die Statistiken entstehen. Pro Session
+ * der später die Stufen und die Bestwerte entstehen. Pro Session
  * gibt es höchstens einen Eintrag — erneutes Abhaken aktualisiert ihn.
  */
 export async function logSession(session: Session, entry: QuickLog): Promise<void> {

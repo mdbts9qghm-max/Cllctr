@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 import { formatShort, weekdayShort } from '@/lib/dates';
+import { currentRecords, formatRecordValue, PR_KIND_LABEL } from '@/lib/pr';
 import {
   deleteSession,
   findDuplicateSessions,
@@ -47,8 +48,11 @@ function monthLabel(iso: string): string {
  * Das Logbuch — der Verlauf als eigener Ort.
  *
  * Alles, was erledigt wurde, sammelt sich hier: unabhängig davon, ob der Plan,
- * aus dem es stammt, noch existiert. Aus diesen Einträgen rechnen Statistik,
- * Stufen und Seelen — wer hier etwas korrigiert, korrigiert es überall.
+ * aus dem es stammt, noch existiert. Aus diesen Einträgen rechnen Stufen,
+ * Bestwerte und Seelen — wer hier etwas korrigiert, korrigiert es überall.
+ *
+ * Die Bestwerte stehen deshalb ebenfalls hier und nicht mehr in einem eigenen
+ * Tab: Sie sind kein Diagramm, sondern die Spitze dieses Verlaufs.
  */
 export default function LogbuchPage() {
   const [openId, setOpenId] = useState<string | null>(null);
@@ -67,7 +71,11 @@ export default function LogbuchPage() {
       .filter((s) => s.status === 'done')
       .sort((a, b) => b.date.localeCompare(a.date) || a.orderInDay - b.orderInDay)
       .map((session) => ({ session, log: byId.get(session.id) ?? null }));
-    return { entries, duplicates: await findDuplicateSessions() };
+    return {
+      entries,
+      duplicates: await findDuplicateSessions(),
+      records: await currentRecords(),
+    };
   }, []);
 
   if (!data) return <p className="text-sm text-ink-faint">Lade …</p>;
@@ -150,7 +158,7 @@ export default function LogbuchPage() {
 
       <Section
         title="Logbuch"
-        hint="Alles, was du erledigt hast — auch aus Plänen, die es nicht mehr gibt. Statistik, Stufen und Seelen rechnen aus diesen Einträgen. Was du hier änderst, ändert sich überall."
+        hint="Alles, was du erledigt hast — auch aus Plänen, die es nicht mehr gibt. Stufen, Bestwerte und Seelen rechnen aus diesen Einträgen. Was du hier änderst, ändert sich überall."
       >
         <Card>
           <div className="grid grid-cols-3 gap-2 text-center">
@@ -333,6 +341,40 @@ export default function LogbuchPage() {
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="mt-8">
+        <Section
+          title="Bestwerte"
+          hint="Die App erkennt neue Bestwerte selbst — eingetragen wird nur, was tatsächlich geschafft wurde."
+        >
+          {data.records.length === 0 ? (
+            <Notice tone="info">
+              Noch keine Bestwerte. Trag beim Abhaken einer Krafteinheit deine schwersten Sätze
+              ein, dann erkennt die App den Rest.
+            </Notice>
+          ) : (
+            <div className="space-y-2">
+              {data.records.map(({ exercise, records }) => (
+                <Card key={exercise.id}>
+                  <p className="mb-2 font-medium text-ink">{exercise.name}</p>
+                  <div className="space-y-1">
+                    {records.map((record) => (
+                      <div key={record.id} className="flex items-baseline justify-between gap-3">
+                        <span className="text-xs text-ink-faint">{PR_KIND_LABEL[record.kind]}</span>
+                        <span className="flex-1 border-b border-dotted border-line" />
+                        <span className="text-sm text-ink tabular">{formatRecordValue(record)}</span>
+                        <span className="w-20 shrink-0 text-right text-[11px] text-ink-faint tabular">
+                          {formatShort(record.date)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </Section>
       </div>
     </>
   );

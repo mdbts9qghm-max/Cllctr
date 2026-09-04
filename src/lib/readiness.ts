@@ -17,11 +17,23 @@ import { now } from './ids';
 import {
   DEFAULT_RECOVERY,
   DEFAULT_SLEEP_DEBT,
+  recoveryFromWhoop,
+  sleepDebtFromHours,
   type DayReadiness,
   type IsoDate,
   type Recovery,
   type SleepDebt,
+  type WhoopEntry,
 } from './types';
+
+export const EMPTY_WHOOP: WhoopEntry = {
+  recoveryPct: null,
+  sleepHours: null,
+  sleepDebtHours: null,
+  strain: null,
+  hrvMs: null,
+  restingHr: null,
+};
 
 /** Der Normalfall für einen Tag ohne Eintrag. */
 export function defaultReadiness(date: IsoDate): DayReadiness {
@@ -31,6 +43,7 @@ export function defaultReadiness(date: IsoDate): DayReadiness {
     recovery: DEFAULT_RECOVERY,
     sleepHours: null,
     sleepDebt: DEFAULT_SLEEP_DEBT,
+    whoop: null,
     note: '',
     createdAt: ts,
     updatedAt: ts,
@@ -64,6 +77,53 @@ export async function setReadiness(
     createdAt: existing?.createdAt ?? ts,
     updatedAt: ts,
   });
+}
+
+/**
+ * Trägt WHOOP-Werte ein und leitet daraus ab, was die Planung braucht.
+ *
+ * Beides in einem Schritt: Die Rohwerte bleiben stehen, und Erholung, Schlaf
+ * und Schlafschuld werden daraus **überschrieben**. Sonst stünde auf der Uhr
+ * 28 % und in der App weiter "mittel", weil dort noch die Einschätzung von
+ * gestern klebt — und der Plan rechnete mit einer Erholung, die es nicht gibt.
+ *
+ * Was WHOOP nicht liefert, bleibt unberührt: Wer nur die Recovery überträgt,
+ * behält seine eigene Angabe zum Schlaf.
+ */
+export async function setWhoop(date: IsoDate, patch: Partial<WhoopEntry>): Promise<void> {
+  const existing = await db.readiness.get(date);
+  const base = existing ?? defaultReadiness(date);
+  const whoop: WhoopEntry = { ...EMPTY_WHOOP, ...(base.whoop ?? {}), ...patch };
+  const ts = now();
+
+  await db.readiness.put({
+    ...base,
+    date,
+    whoop: isEmptyWhoop(whoop) ? null : whoop,
+    recovery: whoop.recoveryPct !== null ? recoveryFromWhoop(whoop.recoveryPct) : base.recovery,
+    sleepHours: whoop.sleepHours !== null ? whoop.sleepHours : base.sleepHours,
+    sleepDebt:
+      whoop.sleepDebtHours !== null ? sleepDebtFromHours(whoop.sleepDebtHours) : base.sleepDebt,
+    createdAt: existing?.createdAt ?? ts,
+    updatedAt: ts,
+  });
+}
+
+export function isEmptyWhoop(w: WhoopEntry | null | undefined): boolean {
+  if (!w) return true;
+  return (
+    w.recoveryPct === null &&
+    w.sleepHours === null &&
+    w.sleepDebtHours === null &&
+    w.strain === null &&
+    w.hrvMs === null &&
+    w.restingHr === null
+  );
+}
+
+/** Kommt die Erholung dieses Tages aus WHOOP oder aus eigener Einschätzung? */
+export function isFromWhoop(row: DayReadiness | undefined): boolean {
+  return row?.whoop?.recoveryPct !== null && row?.whoop?.recoveryPct !== undefined;
 }
 
 /** Entfernt den Eintrag wieder — der Tag gilt dann als normal. */

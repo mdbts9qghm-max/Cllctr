@@ -1760,6 +1760,122 @@ Ernährungsempfehlung ändern sich sofort mit.
 
 ---
 
+## WHOOP, Ernährung als Tab, kompakte Steigerung
+
+### Die Statistik ist weg
+
+Der fünfte Tab war *Statistik*: Wochenvolumen, Zonenverteilung, RPE-Verlauf, Deload-Signal.
+Er ist ersatzlos gestrichen. Was dort stand, war eine Nacherzählung des Logbuchs in
+Diagrammform — und ein Diagramm, das nur bestätigt, was man ohnehin weiß, ist kein Feature,
+sondern 121 kB JavaScript.
+
+Zwei Dinge sind mitgezogen statt zu verschwinden:
+
+- **Bestwerte** stehen jetzt im **Logbuch**. Sie sind kein Diagramm, sondern die Spitze
+  dieses Verlaufs — sie gehören dorthin, wo die Einträge liegen, aus denen sie entstehen.
+- Die **Doppel-Erkennung** lag ohnehin schon im Logbuch.
+
+Gelöscht: `src/app/statistik/`, `src/components/charts.tsx`, `src/lib/stats.ts`.
+
+### Ernährung bekommt den freien Platz
+
+Der Tab heißt jetzt **Ernährung**. Er zeigt drei Dinge:
+
+1. **Heute** — die volle Empfehlung: Richtung, Makros, Timing, schichtspezifische Hinweise.
+2. **Die nächsten Tage** — sechs Zeilen, je eine pro Tag, mit Energierichtung und der
+   geplanten Einheit. Antippen klappt die Einzelheiten auf. Der Sinn ist praktisch: Wer am
+   Freitag sieht, dass Sonntag Intervalle stehen, kauft am Samstag anders ein.
+3. **Die Regel dahinter** — die Tabelle, nach der die App entscheidet.
+
+Gerechnet wird weiterhin bei jedem Aufruf aus `nutrition.ts`; gespeichert wird nichts.
+
+### WHOOP: die Zahlen von der Uhr
+
+Es gibt **keine Schnittstelle**. Cllctr hat keinen Server und keine API-Schlüssel — das ist
+der Kern des Projekts, nicht eine fehlende Funktion. Übertragen werden deshalb die Zahlen,
+die morgens ohnehin auf dem Bildschirm stehen:
+
+| Feld | wofür |
+|---|---|
+| Recovery % | wird zur Erholungsstufe |
+| Schlaf (h) | wird zur Schlafdauer |
+| Sleep Debt (h) | wird zur Schlafschuld |
+| Day Strain, HRV, Ruhepuls | nur Verlauf, hinter dem Aufklapper |
+
+Die Umrechnung nutzt **WHOOPs eigene Farbgrenzen**: rot bis 33 % ist `low`, gelb bis 66 %
+ist `mid`, grün darüber ist `high`. Eigene Schwellen zu setzen hieße, der Zahl auf dem
+Handgelenk zu widersprechen — dann stünde in der App etwas anderes als auf der Uhr. Die
+Sleep Debt wird bei einer Stunde und bei drei Stunden geschnitten; unter einer Stunde ist
+Rauschen, ab drei fehlt eine halbe Nacht.
+
+`setWhoop()` schreibt die Rohwerte **und** überschreibt die abgeleiteten Felder. Ohne das
+Überschreiben stünde auf der Uhr 28 % und in der App weiter „mittel", weil dort die
+Einschätzung von gestern klebt. Die drei Knöpfe darunter bleiben als Ausweg: für Tage ohne
+Uhr, und für einen Wert, den man nicht glaubt.
+
+Die Rohwerte werden aufgehoben, nicht nur die Stufe: 68 % und 34 % sind beide „mittel bis
+hoch" und erzählen doch Verschiedenes. Wer die Zahl behält, kann später anders auswerten.
+
+### Eine Eingabe, die sofort wirkt
+
+Der Fingerabdruck der Planungsgrundlage wurde in `AppShell` ohne die Erholung gebildet —
+und weil Dexies `liveQuery` nur beobachtet, was sie tatsächlich liest, änderte sich beim
+Eintragen der WHOOP-Werte gar nichts. Die Karte zeigte sofort „locker", im Plan stand
+weiter die mittlere Krafteinheit.
+
+Jetzt liest die Abfrage die Erholungstabelle mit. Durchgespielt: Recovery auf 22 %
+gesetzt → die Einheit des Tages wird zum lockeren Lauf, die Ernährung wechselt auf „kein
+Defizit bei großer Schlafschuld"; danach auf 85 % → *„Plan angepasst: an 22 Tagen liegt
+jetzt etwas anderes"*, heute stehen Intervalle.
+
+Dieselbe Zahl wirkt auch auf den **Haushalt**: Bei niedriger Erholung fällt das
+Aufgabenbudget auf `light`. Sonst hätte die App auf demselben Bildschirm das Training auf
+locker heruntergesetzt und zwei Zeilen tiefer den Großputz vorgeschlagen.
+
+### Die Steigerung nimmt keine halbe Seite mehr ein
+
+Aus 6 steigernden Einheitsarten sind 12 geworden — als Liste mit Titel, Detailzeile und
+Stufe waren das zwei Bildschirmhöhen für eine Zahl, die man selten braucht. Jetzt steht der
+Stand als **Kachelfeld**: Name und Stufe pro Kachel, drei Zeilen statt vierundzwanzig. Die
+Einzelheiten und die Korrekturknöpfe erscheinen erst beim Antippen einer Kachel.
+
+### Die Seelen kennen die neuen Regeln
+
+- **Entfernt: „Doppelt genommen".** Der neue Generator plant nie zwei Einheiten an einem
+  Tag. Eine Seele, die der Plan nicht mehr hergibt, ist keine Belohnung, sondern eine
+  Sackgasse.
+- **„Auf breiter Front"** verlangte jede steigernde Art auf Stufe 5. Bei 12 Arten wäre das
+  unerreichbar geworden, ohne dass jemand etwas falsch gemacht hätte — jetzt zählen die
+  sechs **Kernarten**, um die der Generator den Plan baut.
+- **„Im Zaum gehalten"** schloss den Long Run ein. Der trägt inzwischen eine
+  Endbeschleunigung und zählt als hart; RPE 4 wäre dort kein Zeichen von Disziplin,
+  sondern eine verpasste Einheit. Jetzt zählen nur Läufe der Intensität *locker*.
+- **„Jede Schicht bespielt"** fragte die Kapazität. Die Tagschicht hat formal eine, trägt
+  aber nie eine Einheit — die Seele war unerreichbar. Jetzt fragt sie das Regelwerk.
+
+Neu dazugekommen, alle an den neuen Regeln aufgehängt:
+
+| Seele | Bedingung |
+|---|---|
+| **Hingehört** | Fünfmal an einem Tag mit niedriger Erholung nichts Hartes trainiert |
+| **Sieben Tage gemessen** | Eine Woche am Stück die Erholung eingetragen |
+| **Vier Wochen Daten** | An 28 Tagen die Werte von der Uhr übertragen |
+| **Beide Seiten** | In einer Woche harte Ausdauer *und* schwere Kraft erledigt |
+| **Ausgereizt, nicht überzogen** | Genau drei harte Einheiten in einer Woche — keine vierte |
+
+„Hingehört" ist die wichtigste davon: Sie belohnt ausdrücklich das *Nicht*-Training. Die
+schwerste Übung im Hybridtraining ist, es an einem schlechten Tag sein zu lassen — und ein
+Belohnungssystem, das nur Geleistetes zählt, arbeitet genau dagegen.
+
+Der Katalog steht damit bei 23 Seelen. `SoulContext` trägt jetzt die Erholungseinträge mit.
+
+### Schema 11
+
+`DayReadiness.whoop` (Rohwerte), `recoveryFromWhoop()` und `sleepDebtFromHours()` in
+`types.ts`, `setWhoop()` in `readiness.ts`.
+
+---
+
 ## Entwicklung
 
 ```

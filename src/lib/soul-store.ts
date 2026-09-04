@@ -37,18 +37,20 @@ function soulKey(key: string, sourceId: string | null): string {
 
 async function buildContext(): Promise<SoulContext> {
   const shiftContext = await loadShiftContext();
-  const [sessions, logs, microcycles, mesocycles, records, tasks] = await Promise.all([
+  const [sessions, logs, microcycles, mesocycles, records, tasks, readiness] = await Promise.all([
     db.sessions.toArray(),
     db.sessionLogs.toArray(),
     db.microcycles.toArray(),
     db.mesocycles.toArray(),
     db.personalRecords.toArray(),
     db.tasks.toArray(),
+    db.readiness.toArray(),
   ]);
   const wayAreas = await db.wayAreas.toArray();
   return {
     sessions,
     logs,
+    readiness,
     microcycles,
     mesocycles,
     records,
