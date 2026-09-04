@@ -427,7 +427,11 @@ export function chooseSession(
   ledger: WeekLedger,
   targets: WeeklyTargets,
   ctx: DayContext,
-  /** Wie viele harte Läufe insgesamt schon geplant/absolviert wurden — für die Rotation. */
+  /**
+   * Zeiger in die Rotation der harten Läufe. Kommt aus der Kalenderwoche, nicht
+   * aus einem laufenden Zähler — dieselbe Woche bekommt bei jeder Neuplanung
+   * dieselbe Einheit.
+   */
   hardRunRotation: number,
 ): Choice | null {
   if (allowance.cap === null) return null;

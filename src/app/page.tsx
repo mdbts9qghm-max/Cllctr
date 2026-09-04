@@ -29,7 +29,7 @@ import { CAPACITY_LABEL, TASK_ENERGY_LABEL, type Session, type Task , type Soul 
 import { Button, CapacityBadge, Card, Mark, Notice, Section } from '@/components/ui';
 import { NewRecordsNotice, SessionLogForm } from '@/components/SessionLogForm';
 import { SessionCard } from '@/components/SessionCard';
-import { DayCoach } from '@/components/DayCoach';
+import { ReadinessCard } from '@/components/ReadinessCard';
 
 /** Tage in der Vorschau "Als Nächstes". */
 const LOOKAHEAD_DAYS = 4;
@@ -192,24 +192,11 @@ export default function HeutePage() {
           <CapacityBadge capacity={day.capacity} label={CAPACITY_LABEL[day.capacity]} />
         </Link>
 
-        {/* Nur die Erholung — die Eingabe, von der alles Weitere abhängt, und
-            die sonst nie gemacht würde.
-
-            Regel und Ernährung stehen bewusst nicht mehr hier: Die Einheit
-            darunter begründet sich über `planReason` schon selbst, und für die
-            Ernährung gibt es einen eigenen Tab. Beides zusätzlich anzuzeigen
-            hieß, den Heute-Screen mit Erklärungen zu füllen und das, worum es
-            geht — was heute ansteht —, unter den Rand zu schieben. */}
+        {/* Nur die Werte — die Eingabe, von der alles Weitere abhängt, und die
+            sonst nie gemacht würde. Was daraus folgt, steht an der Einheit
+            darunter, nicht in einem eigenen Kasten darüber. */}
         <div className="mb-4">
-          <DayCoach
-            day={day}
-            settings={settings}
-            sessions={todaySessions}
-            allSessions={data.sessions}
-            isDeloadWeek={micro?.isDeload ?? false}
-            showRules={false}
-            showNutrition={false}
-          />
+          <ReadinessCard day={day} />
         </div>
 
         {message ? (

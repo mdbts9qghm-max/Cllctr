@@ -1941,10 +1941,11 @@ ausgewertet.
 
 ### In der Oberfläche
 
-Aus der Karte *Erholung* ist die Karte **Werte** geworden: drei Felder (Recovery, Schlaf,
-Sleep Debt), drei weitere hinter dem Aufklapper (HRV, Ruhepuls, Strain). Darunter steht die
-Schlussfolgerung — „Erholung niedrig · gemessen · 26 % Recovery — das ist niedrig" — samt
-den einzelnen Signalen, die dazu geführt haben. Kein Knopf, weil es keine Eingabe ist.
+Aus der Karte *Erholung* ist die Karte **Werte** geworden (`ReadinessCard`): drei Felder
+(Recovery, Schlaf, Sleep Debt), drei weitere hinter dem Aufklapper (HRV, Ruhepuls, Strain).
+Darunter steht die Schlussfolgerung — „Erholung niedrig · gemessen · 26 % Recovery — das ist
+niedrig" — samt den einzelnen Signalen, die dazu geführt haben. Kein Knopf, weil es keine
+Eingabe ist.
 
 Die Schätzung läuft an **einer** Stelle: `explainDay()` gibt sie zusammen mit der Regel
 zurück, der Generator rechnet sie für den ganzen Zeitraum in einem Durchgang vor
@@ -1977,6 +1978,85 @@ durchgehend 20 % Recovery und bei durchgehend 4,5 h Schlaf (nichts über locker)
 `DayReadiness` flach und nur noch Messwerte: `sleepHours`, `recoveryPct`, `sleepDebtHours`,
 `strain`, `hrvMs`, `restingHr`. `recovery` und `sleepDebt` entfallen als gespeicherte
 Felder.
+
+---
+
+## Der Plan rechnet sich täglich neu
+
+Zwei Aufräumarbeiten und eine Verhaltensänderung.
+
+### Ernährung und Regeln nur noch dort, wo sie hingehören
+
+Die **Ernährungsempfehlung** stand in der Tageskarte *und* im eigenen Tab. Zweimal dasselbe
+an zwei Orten heißt: Einer von beiden ist irgendwann veraltet, und niemand weiß welcher.
+Sie steht jetzt ausschließlich im Ernährungs-Tab.
+
+Der Block **„Was heute geht"** ist ganz entfallen. Er formulierte die Regel aus, nach der
+der Plan ohnehin schon entschieden hatte — eine Rechnung, die der Nutzer nicht nachrechnen
+soll. Warum eine Einheit so aussieht, steht weiterhin an der Einheit (`planReason`).
+
+Von `DayCoach` bleibt damit nur die Werte-Eingabe übrig; die Komponente heißt jetzt
+`ReadinessCard` und braucht nur noch den Tag. `settings`, `sessions`, `allSessions`,
+`isDeloadWeek` und zwei Schalter sind mit dem Rest weggefallen.
+
+### Täglich statt nur bei Änderungen
+
+Der Plan passte sich an, wenn sich der Fingerabdruck der Grundlage bewegte — Schichten,
+Erholung, Ziele. Das Datum gehörte nicht dazu. Also stand der Plan von vorgestern auch heute
+noch unverändert da, obwohl sich zwei Dinge geändert hatten: Der Tag, für den mangels Werten
+von guter Erholung ausgegangen wurde, ist jetzt der Tag, an dem der Normalfall gilt. Und die
+zwölf Wochen Vorausschau wurden Tag für Tag kürzer.
+
+Jetzt steht das Datum im Fingerabdruck. Dazu ein Wecker in `AppShell`, der einmal pro Minute
+nachsieht, ob ein neuer Tag begonnen hat: Auf dem Homescreen wird die App über Nacht nicht
+geschlossen, und Dexie meldet nur Änderungen an Tabellen — der Kalender ist keine.
+
+### Damit der Plan nicht jeden Tag ein anderer ist
+
+Tägliche Neuplanung deckte zwei Konstruktionsfehler auf, die vorher nur selten auffielen.
+Ein Tageswechsel warf **24 von 92 Tagen** um.
+
+1. **Die Deload-Woche wanderte mit.** Der Block zählte die Wochen *des Plans*: die fünfte
+   Woche ab dem Erzeugen war Deload. Da der Plan sich täglich neu erzeugt, rückte die
+   Deload-Woche jeden Tag um einen Tag weiter und kam nie an. Sie hängt jetzt am Kalender —
+   über `Settings.blockAnchorDate`, den Montag der Woche, in der der erste Plan entstand.
+   Der Anker wird einmal gesetzt und nie wieder angefasst: So beginnt Block 1 trotzdem
+   dann, wenn man angefangen hat.
+2. **Die Rotation der harten Läufe war ein Zähler.** Intervalle → Long Run → Schwelle →
+   Tempo lief über einen fortlaufenden Zählstand. Fiel eine Einheit weg, verschob sich die
+   Reihenfolge für **alle** folgenden Wochen. Jetzt bestimmt die Kalenderwoche den Zeiger:
+   Dieselbe Woche bekommt bei jeder Neuplanung dieselben harten Läufe.
+3. Dazu: Die angebrochene erste Woche bekam anteilig gekürzte Ziele, obwohl auf ihren
+   früheren Tagen schon etwas lag. Damit wurden dieselben Tage zweimal abgezogen. Jetzt
+   zählt, was dort steht, in die Wochenbilanz mit, und gekürzt wird nur noch eine Woche,
+   die am **Ende** abgeschnitten ist — dort, wo der eingetragene Schichtplan aufhört.
+
+Danach ändert ein Tageswechsel noch **etwa 10 von 92 Tagen** die Einheitsart und **6** die
+Intensität. Der Rest ist keine Unruhe mehr, sondern die Regel selbst: Die Obergrenze von
+drei harten Einheiten gilt **rollierend über sieben Tage**, also wirkt eine Verschiebung
+heute bis in die nächste Woche hinein. Wer einen bestimmten Tag festhalten will, fixiert die
+Einheit — fixierte Einheiten überleben jede Neuplanung.
+
+### Gemeldet wird nur die kommende Woche
+
+Weil sich weiter hinten fast täglich etwas verschiebt, zählt die Meldung „Plan angepasst: an
+N Tagen liegt jetzt etwas anderes" nur noch die **nächsten sieben Tage** — das ist der
+Zeitraum, in dem man tatsächlich etwas anders macht. Und ein „es blieb alles, wie es war"
+gibt es nicht mehr: Ein Banner, das jeden Tag erscheint, wird nach drei Tagen nicht mehr
+gelesen, und dann übersieht man auch den Tag, an dem etwas darinsteht.
+
+### Geprüft
+
+Eine eigene Testreihe misst die Unruhe: Für sechs aufeinanderfolgende Starttage wird der
+Plan zweimal erzeugt — einmal für den Tag, einmal für den Tag danach — und verglichen, wie
+viele gemeinsame Tage sich in Art und Intensität unterscheiden. Dazu die Probe, dass eine
+Woche zwei Monate in der Zukunft aus zwei völlig verschiedenen Plänen dieselben harten Läufe
+bekommt.
+
+Im Browser mit gestellter Uhr durchgespielt: Plan am 7. September erzeugt, Uhr auf den 8.
+und den 11. gedreht, **ohne Neuladen**. Der Planstart rückt jeweils mit, der Horizont
+verlängert sich, und die Deload-Wochen bleiben auf dem 5. Oktober und dem 9. November
+stehen.
 
 ---
 

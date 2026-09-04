@@ -7,7 +7,7 @@
  */
 
 import { db } from './db';
-import { addDays, today } from './dates';
+import { addDays, startOfWeek, today } from './dates';
 import { newId, now } from './ids';
 import {
   generateTrainingPlan,
@@ -121,6 +121,17 @@ export async function createAndSavePlan(input: PlanInput): Promise<GeneratedPlan
       // Löschen, also muss er nicht vorher gerettet werden.
       const progressionBase = input.progressionBase ?? (await currentProgressionLevels());
 
+      // Der Blockanker wird beim allerersten Plan gesetzt und danach nie wieder
+      // angefasst: Block 1 beginnt in der Woche, in der man angefangen hat, und
+      // die Deload-Woche liegt ab da fest — auch wenn der Plan sich täglich neu
+      // rechnet.
+      const stored = await db.settings.get('singleton');
+      let blockAnchor = input.blockAnchor ?? stored?.blockAnchorDate ?? null;
+      if (!blockAnchor) {
+        blockAnchor = startOfWeek(input.startDate);
+        await db.settings.update('singleton', { blockAnchorDate: blockAnchor, updatedAt: now() });
+      }
+
       // Protokollierte Einheiten überleben das Löschen. Der neue Plan muss sie
       // kennen, sonst legt er auf denselben Tag noch eine zweite.
       const completed =
@@ -146,7 +157,11 @@ export async function createAndSavePlan(input: PlanInput): Promise<GeneratedPlan
         .map((s) => ({ date: s.date, type: s.type }));
 
       const until = input.until ?? planningHorizon(input.ctx, input.weeks, input.startDate);
-      const readiness = input.readiness ?? (await readinessRange(input.startDate, until));
+      // Drei Wochen vor den Start hinaus: Die Basislinie für HRV und Ruhepuls
+      // entsteht aus den Tagen davor. Ohne sie wären die Messwerte des ersten
+      // Planungstages Zahlen ohne Bezugspunkt.
+      const readiness =
+        input.readiness ?? (await readinessRange(addDays(input.startDate, -21), until));
 
       plan = generateTrainingPlan({
         ...input,
@@ -155,6 +170,7 @@ export async function createAndSavePlan(input: PlanInput): Promise<GeneratedPlan
         history: input.history ?? history,
         readiness,
         until,
+        blockAnchor,
       });
 
       await clearPlanFrom(input.startDate);
@@ -200,8 +216,13 @@ export const PLAN_WEEKS = 12;
  *
  * Der Nutzer soll nicht daran denken müssen, nach jedem Schichttausch "Plan neu
  * erzeugen" zu drücken. Verglichen wird der Fingerabdruck der Eingaben —
- * Rotation, Schichtarten, Abweichungen, Wochenziele. Weicht er ab, wird ab
- * heute neu geplant.
+ * Rotation, Schichtarten, Abweichungen, Erholungswerte, Wochenziele **und das
+ * Datum**. Weicht er ab, wird ab heute neu geplant.
+ *
+ * Das Datum gehört dazu, damit der Plan sich **täglich** anpasst: Ein Tag, für
+ * den mangels Werten von guter Erholung ausgegangen wurde, ist heute der Tag,
+ * an dem der Normalfall gilt. Und die zwölf Wochen Vorausschau rücken mit —
+ * sonst würde der Plan Tag für Tag kürzer, bis nichts mehr da ist.
  *
  * Was dabei nicht angerührt wird: erledigte und protokollierte Einheiten, und
  * alles, was **fixiert** ist. Wer eine bestimmte Einheit an ihrem Tag halten
@@ -228,7 +249,7 @@ export async function syncPlan(
 
   // Die Erholung gehört zur Grundlage: Trägt man für morgen "niedrig" ein, muss
   // der Plan das von selbst berücksichtigen, ohne dass man etwas drückt.
-  const readiness = await readinessRange(from, horizon);
+  const readiness = await readinessRange(addDays(from, -21), horizon);
   const current = planFingerprint(ctx, settings, from, readiness);
   if (macro.inputFingerprint === '') {
     // Plan von vor der Automatik: Fingerabdruck nachtragen, aber nicht neu
@@ -241,10 +262,17 @@ export async function syncPlan(
   // Gezählt wird in **Tagen**, nicht in Einheiten: "an drei Tagen liegt jetzt
   // etwas anderes" sagt mehr als eine Zahl, die durch Verschiebungen in beide
   // Richtungen ohnehin nur die halbe Wahrheit trifft.
+  //
+  // Und nur die **kommende Woche**: Der Plan rechnet sich täglich neu, und dabei
+  // verschiebt sich weiter hinten fast immer etwas — eine Zahl, die das
+  // mitzählt, stünde jeden Tag da und würde nach drei Tagen nicht mehr gelesen.
+  // Gemeldet wird, was man in den nächsten sieben Tagen tatsächlich anders
+  // machen muss.
+  const noticeUntil = addDays(from, 7);
   const dayMap = (list: Session[]) => {
     const out = new Map<IsoDate, string>();
     for (const s of list) {
-      if (s.status !== 'planned' || s.date < from) continue;
+      if (s.status !== 'planned' || s.date < from || s.date > noticeUntil) continue;
       out.set(s.date, [...(out.get(s.date)?.split(',') ?? []), s.type].sort().join(','));
     }
     return out;

@@ -1023,6 +1023,16 @@ export interface Settings {
    * genutzt, wenn sonst etwas ausfallen oder verkürzt werden müsste.
    */
   allowDoubleDayPerCycle: boolean;
+  /**
+   * Ab welchem Montag der Blockrhythmus gezählt wird.
+   *
+   * Wird beim ersten Plan gesetzt und danach nie wieder angefasst. Der Grund
+   * ist die tägliche Anpassung: Zählte der Plan seine eigenen Wochen, wanderte
+   * die Deload-Woche mit jeder Neuplanung um einen Tag weiter und käme nie an.
+   * Mit festem Anker liegt sie im Kalender fest — und Block 1 beginnt trotzdem
+   * an dem Tag, an dem du angefangen hast.
+   */
+  blockAnchorDate: IsoDate | null;
   /** Zyklen pro Mesozyklus: Belastung und anschließender Deload. */
   mesoLoadCycles: number;
   mesoDeloadCycles: number;

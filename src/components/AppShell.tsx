@@ -105,6 +105,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const settings = useSettings();
 
   /**
+   * Der heutige Tag als Zustand, nicht als Aufruf.
+   *
+   * Der Plan passt sich täglich an — dafür muss die App mitbekommen, dass ein
+   * neuer Tag begonnen hat. Wird sie über Nacht nicht geschlossen (auf dem
+   * Homescreen der Normalfall), merkt sonst niemand den Wechsel: Dexie meldet
+   * nur Änderungen an Tabellen, und der Kalender ist keine.
+   *
+   * Einmal pro Minute nachsehen reicht. Ein Timer, der nur eine Zeichenkette
+   * vergleicht, kostet nichts, und ein Plan, der um 00:01 statt sofort
+   * umspringt, stört niemanden.
+   */
+  const [todayIso, setTodayIso] = useState(() => today());
+  useEffect(() => {
+    const id = setInterval(() => {
+      setTodayIso((previous) => {
+        const current = today();
+        return previous === current ? previous : current;
+      });
+    }, 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  /**
    * Der Fingerabdruck der Planungsgrundlage, rein lesend.
    *
    * Bewusst getrennt vom Anpassen: ein Schreibzugriff in einem laufenden
@@ -115,14 +138,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (!ctx || !settings) return undefined;
     const macro = (await db.macrocycles.toArray()).find((m) => m.active);
     if (!macro) return null;
-    const from = today();
     // Die Erholung wird hier **gelesen**, damit Dexie die Tabelle beobachtet.
     // Ohne diesen Zugriff bliebe der Fingerabdruck gleich, wenn man morgens die
     // Werte von der Uhr einträgt — und der Plan stünde weiter auf einer
     // Erholung, die es nicht mehr gibt.
-    const readiness = await readinessRange(from, addDays(from, PLAN_WEEKS * 7));
-    return planFingerprint(ctx, settings, from, readiness);
-  }, [ctx, settings]);
+    //
+    // Die Basislinie für HRV und Ruhepuls entsteht aus den Tagen davor; deshalb
+    // reicht das Fenster drei Wochen zurück und nicht nur bis heute.
+    const readiness = await readinessRange(
+      addDays(todayIso, -21),
+      addDays(todayIso, PLAN_WEEKS * 7),
+    );
+    return planFingerprint(ctx, settings, todayIso, readiness);
+  }, [ctx, settings, todayIso]);
 
   useEffect(() => {
     seedIfEmpty()
@@ -135,22 +163,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   /**
-   * Hat sich an Schichten, Erholung, Rotation oder Zielen etwas geändert, zieht
-   * der Plan nach. Läuft nur, wenn der Fingerabdruck sich tatsächlich bewegt hat — sonst
-   * würde jede Navigation den Plan neu bauen.
+   * Der Plan zieht nach, sobald sich die Grundlage bewegt: Schichten, Erholung,
+   * Rotation, Ziele — und das Datum. Mit jedem neuen Tag wird ab dann neu
+   * geplant, ohne dass jemand etwas drücken muss.
+   *
+   * Gemeldet wird nur, wenn tatsächlich etwas anders liegt. Ein tägliches
+   * "es blieb alles, wie es war" wäre nach drei Tagen Tapete: Man liest es
+   * nicht mehr und übersieht deshalb auch den Tag, an dem es etwas zu lesen
+   * gibt.
    */
   useEffect(() => {
     if (!ready || !ctx || !settings || !fingerprint) return;
     let cancelled = false;
     syncPlan(ctx, settings)
       .then((result) => {
-        if (cancelled || !result) return;
+        if (cancelled || !result || result.changed === 0) return;
         setPlanNotice(
-          result.changed === 0
-            ? 'Plan an Schichten und Erholung angepasst — es blieb alles, wie es war.'
-            : `Plan angepasst: an ${result.changed} ${
-                result.changed === 1 ? 'Tag' : 'Tagen'
-              } liegt jetzt etwas anderes.`,
+          `Plan angepasst: an ${result.changed} ${
+            result.changed === 1 ? 'Tag' : 'Tagen'
+          } liegt jetzt etwas anderes.`,
         );
         void syncSouls();
       })

@@ -226,6 +226,8 @@ export function defaultSettings(): Settings {
     // dort geht Laufen während der Schicht — aber kein Gym.
     allowStrengthOnLightDays: false,
     allowDoubleDayPerCycle: true,
+    // Leer: Der Anker wird beim ersten Plan auf die dann laufende Woche gesetzt.
+    blockAnchorDate: null,
     mesoLoadCycles: 4,
     mesoDeloadCycles: 1,
     // Leer: keine Korrektur, der erste Plan fängt bei null an.

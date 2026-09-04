@@ -25,7 +25,7 @@ import type { ReschedulePlan } from '@/lib/replan';
 import { SESSION_STATUS_LABEL, SESSION_TYPES, type Session, type Soul } from '@/lib/types';
 import { MonthGrid } from '@/components/MonthGrid';
 import { ShiftPicker } from '@/components/ShiftPicker';
-import { DayCoach } from '@/components/DayCoach';
+import { ReadinessCard } from '@/components/ReadinessCard';
 import { Button, Card, Mark, Notice, Section } from '@/components/ui';
 import { NewRecordsNotice, SessionLogForm } from '@/components/SessionLogForm';
 
@@ -224,13 +224,7 @@ export default function PlanPage() {
         </div>
 
         <div className="mb-3">
-          <DayCoach
-            day={day}
-            settings={settings!}
-            sessions={own}
-            allSessions={plan!.sessions}
-            isDeloadWeek={microByDate(date)?.isDeload ?? false}
-          />
+          <ReadinessCard day={day} />
         </div>
 
         <div className="space-y-3">
@@ -645,7 +639,7 @@ export default function PlanPage() {
       {hasFuturePlan ? (
       <Section
         title="Plan neu erzeugen"
-        hint="Normalerweise nicht nötig — der Plan passt sich bei Änderungen von selbst an. Hier nur, wenn du bewusst neu würfeln willst. Ersetzt wird nur, was ab heute geplant ist; abgeschlossene Wochen, Erledigtes und Fixiertes bleiben unangetastet."
+        hint="Normalerweise nicht nötig — der Plan rechnet sich täglich neu, sobald sich Schicht, Erholung oder Ziele bewegen. Hier nur, wenn du bewusst neu würfeln willst. Ersetzt wird nur, was ab heute geplant ist; abgeschlossene Wochen, Erledigtes und Fixiertes bleiben unangetastet."
       >
         <Card>
           {confirmRegenerate ? (

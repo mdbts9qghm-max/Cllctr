@@ -72,6 +72,8 @@ export interface PlanInput {
   readiness?: Map<IsoDate, DayReadiness>;
   /** Der heutige Tag. Trennt "noch planbar" von "war so". Nur für Tests gesetzt. */
   todayIso?: IsoDate;
+  /** Montag, ab dem der Blockrhythmus zählt. Ohne Angabe der feste Bezugspunkt. */
+  blockAnchor?: IsoDate;
   /** Letzter Tag, für den überhaupt geplant wird. */
   until?: IsoDate;
   /**
@@ -157,9 +159,16 @@ export function planFingerprint(
     settings.weeklyVolumeGrowthPct,
     settings.mesoLoadCycles,
     settings.mesoDeloadCycles,
+    settings.blockAnchorDate ?? '-',
   ].join('|');
 
-  return `2;${rotation};${types};${overrides};${rest};${rules};${zones}`;
+  // Das Datum gehört dazu. Ein Plan ist eine Aussage über **ab heute** — wird
+  // aus morgen heute, hat sich die Grundlage geändert, auch wenn niemand etwas
+  // eingetragen hat: Der Tag, für den mangels Werten von guter Erholung
+  // ausgegangen wurde, ist jetzt der Tag, an dem der Normalfall gilt. Ohne
+  // diesen Teil stünde der Plan von vorgestern noch in vier Wochen unverändert
+  // da.
+  return `3;${from};${rotation};${types};${overrides};${rest};${rules};${zones}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -218,7 +227,7 @@ interface WeekSpan {
  * dem letzten Montag. Sie bekommt trotzdem die vollen Wochenziele anteilig,
  * sonst hätte jeder neue Plan eine leere Anfangswoche.
  */
-function weekSpans(from: IsoDate, to: IsoDate, settings: Settings): WeekSpan[] {
+function weekSpans(from: IsoDate, to: IsoDate, settings: Settings, anchor: IsoDate): WeekSpan[] {
   const perMeso = Math.max(1, settings.mesoLoadCycles + settings.mesoDeloadCycles);
   const spans: WeekSpan[] = [];
   let cursor = from;
@@ -226,13 +235,20 @@ function weekSpans(from: IsoDate, to: IsoDate, settings: Settings): WeekSpan[] {
 
   while (cursor <= to) {
     const end = minDate(addDays(startOfWeek(cursor), 6), to);
-    const inMeso = index % perMeso;
+    // Der Block hängt am **Kalender**, nicht an der Position im Plan.
+    //
+    // Vorher zählte der Plan seine eigenen Wochen: Die fünfte Woche ab dem
+    // Erzeugen war die Deload-Woche. Da sich der Plan täglich neu anpasst,
+    // wanderte die Deload-Woche damit jeden Tag um einen Tag weiter und kam nie
+    // an. Am Kalender festgemacht liegt sie fest — egal, wann zuletzt geplant
+    // wurde.
+    const ordinal = weekOrdinal(cursor, anchor);
     spans.push({
       start: cursor,
       end,
       index,
-      isDeload: inMeso >= settings.mesoLoadCycles,
-      mesoIndex: Math.floor(index / perMeso),
+      isDeload: ordinal % perMeso >= settings.mesoLoadCycles,
+      mesoIndex: Math.floor(ordinal / perMeso),
     });
     cursor = addDays(end, 1);
     index++;
@@ -245,12 +261,26 @@ function minDate(a: IsoDate, b: IsoDate): IsoDate {
 }
 
 /**
- * Anteilige Wochenziele für eine angebrochene Woche.
+ * Fortlaufende Nummer der Kalenderwoche, gerechnet ab einem festen Montag.
  *
- * Eine Woche, die am Freitag beginnt, kann keine drei Krafteinheiten tragen.
- * Ohne diese Kürzung stünde in der ersten Woche jedes neuen Plans ein Ziel,
- * das nie erreichbar war — und die App meldete jede Woche ein Defizit, das
- * keines ist.
+ * Der Bezugspunkt ist willkürlich, aber **fest**: Nur so bekommt dieselbe Woche
+ * bei jeder Neuplanung dieselbe Nummer — und damit dieselben harten Läufe.
+ */
+const ROTATION_EPOCH: IsoDate = '2020-01-06';
+
+function weekOrdinal(date: IsoDate, anchor: IsoDate = ROTATION_EPOCH): number {
+  return Math.floor(daysBetween(startOfWeek(anchor), startOfWeek(date)) / 7);
+}
+
+/**
+ * Anteilige Wochenziele für eine Woche, die nicht ganz im Plan liegt.
+ *
+ * Gemeint ist **nur** eine am Ende abgeschnittene Woche — dort, wo der
+ * eingetragene Schichtplan aufhört. Die erste Woche ist zwar fast immer
+ * angebrochen, ihre früheren Tage liegen aber nicht im Nichts: Dort steht schon
+ * etwas, und das zählt in die Wochenbilanz mit. Sie deshalb zu kürzen hieße,
+ * dieselben Tage zweimal abzuziehen — und der Plan sähe an jedem Wochentag
+ * anders aus, an dem man ihn neu rechnet.
  */
 function scaledTargets(settings: Settings, days: number): Settings['weeklyTargets'] {
   const t = settings.weeklyTargets;
@@ -280,7 +310,8 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
   const todayIso = input.todayIso ?? today();
 
   const lastDay = input.until ?? addDays(startDate, Math.max(1, input.weeks) * 7 - 1);
-  const spans = lastDay >= startDate ? weekSpans(startDate, lastDay, settings) : [];
+  const anchor = input.blockAnchor ?? settings.blockAnchorDate ?? ROTATION_EPOCH;
+  const spans = lastDay >= startDate ? weekSpans(startDate, lastDay, settings, anchor) : [];
 
   // Die Erholung wird für den ganzen Zeitraum auf einmal geschätzt: Die
   // Basislinie für HRV und Ruhepuls hängt an den Tagen davor, und sie an zwei
@@ -329,10 +360,6 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
   const shortfalls: GeneratedPlan['shortfalls'] = [];
 
   let levels: ProgressionLevels = { ...(input.progressionBase ?? {}) };
-  // Wechselt die harten Läufe durch. Startet dort, wo der Verlauf aufgehört hat.
-  let hardRunRotation = (input.history ?? []).filter(
-    (h) => SESSION_TYPES[h.type]?.discipline === 'run' && SESSION_TYPES[h.type]?.countsAsHardDay,
-  ).length;
   // Bezugspunkt für die Steigerung: die letzte **volle Belastungswoche**.
   // Eine angebrochene erste Woche oder eine Deload-Woche taugt nicht dafür —
   // gegen sie gemessen sähe jede normale Woche wie ein Sprung aus.
@@ -343,8 +370,24 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
   for (const span of spans) {
     const days = resolveShiftRange(span.start, span.end, ctx);
     const lengthDays = days.length;
-    const targets = scaledTargets(settings, lengthDays);
+    // Wie viele Tage dieser Kalenderwoche der Plan überhaupt umfasst — inklusive
+    // der bereits vergangenen am Anfang.
+    const coveredDays = daysBetween(startOfWeek(span.start), span.end) + 1;
+    // Welche harten Läufe diese Woche bekommt, hängt allein am Kalender — nicht
+    // daran, wie viele in den Wochen davor lagen. Sonst verschöbe eine einzige
+    // ausgefallene Einheit die Reihenfolge für alle folgenden Wochen, und der
+    // Plan sähe jeden Tag anders aus, ohne dass sich etwas geändert hätte.
+    const rotationSeed = weekOrdinal(span.start, anchor) * 2;
+    const targets = scaledTargets(settings, coveredDays);
+    // Die Woche beginnt nicht bei null, wenn sie schon läuft: Was an den Tagen
+    // vor dem Planungsstart liegt, zählt in die Bilanz mit. Ohne das bekäme der
+    // Mittwoch dieselbe harte Einheit noch einmal, die am Montag schon lag.
     let ledger: WeekLedger = emptyLedger();
+    for (const earlier of (input.history ?? []).filter(
+      (h) => h.date >= startOfWeek(span.start) && h.date < span.start,
+    )) {
+      ledger = addToLedger(ledger, earlier.date, earlier.type);
+    }
     const weekSessions: Session[] = [];
     const lowRecoveryDays: IsoDate[] = [];
 
@@ -378,7 +421,7 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
         continue;
       }
 
-      const choice = chooseSession(allowance, ledger, targets, dayCtx, hardRunRotation);
+      const choice = chooseSession(allowance, ledger, targets, dayCtx, rotationSeed + ledger.hardRun);
       if (!choice) {
         restDays.push({ date: day.date, reason: restAdvice(dayCtx, allowance) });
         continue;
@@ -419,7 +462,6 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
 
       ledger = addToLedger(ledger, day.date, choice.type);
       hard.add(day.date, choice.type);
-      if (meta.discipline === 'run' && meta.countsAsHardDay) hardRunRotation++;
       // Die Stufe steigt nur außerhalb des Deloads: dort wird bewusst unter
       // dem erreichten Stand trainiert, das ist kein Fortschritt.
       if (!span.isDeload && progresses(choice.type)) {
@@ -437,18 +479,21 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
       lowRecoveryDays.length >= 2,
     );
 
+    // Die Blöcke werden für die Anzeige ab 1 durchnummeriert; `mesoIndex` selbst
+    // ist eine Kalendernummer und wäre als "Block 297" nur verwirrend.
+    const displayIndex = mesoById.size + 1;
     const meso = mesoById.get(span.mesoIndex) ?? {
       id: newId('meso'),
       macrocycleId: macrocycle.id,
-      index: span.mesoIndex + 1,
-      name: `Block ${span.mesoIndex + 1}`,
+      index: displayIndex,
+      name: `Block ${displayIndex}`,
       startDate: span.start,
       endDate: span.end,
       loadCycles: settings.mesoLoadCycles,
       deloadCycles: settings.mesoDeloadCycles,
       focus: 'maintain' as const,
       emphasis: 'balanced' as const,
-      status: span.mesoIndex === 0 ? ('active' as const) : ('planned' as const),
+      status: displayIndex === 1 ? ('active' as const) : ('planned' as const),
       createdAt: ts,
       updatedAt: ts,
     };
