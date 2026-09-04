@@ -123,7 +123,12 @@ export async function createAndSavePlan(input: PlanInput): Promise<GeneratedPlan
           )
           .map((s) => ({ date: s.date, type: s.type }));
 
-      plan = generateTrainingPlan({ ...input, progressionBase, completed });
+      plan = generateTrainingPlan({
+        ...input,
+        progressionBase,
+        completed,
+        until: input.until ?? planningHorizon(input.ctx),
+      });
 
       await clearPlanFrom(input.startDate);
       await db.macrocycles.put(plan.macrocycle);
@@ -137,6 +142,18 @@ export async function createAndSavePlan(input: PlanInput): Promise<GeneratedPlan
 }
 
 
+
+/**
+ * Bis wann überhaupt geplant werden kann.
+ *
+ * Mit Rotation: unbegrenzt, die Folge wiederholt sich ja. Ohne Rotation nur bis
+ * zum letzten eingetragenen Tag — was danach kommt, weiß niemand.
+ */
+export function planningHorizon(ctx: ShiftContext): IsoDate | undefined {
+  if (ctx.pattern && ctx.pattern.sequence.length > 0) return undefined;
+  const dates = ctx.overrides.map((o) => o.date).sort();
+  return dates[dates.length - 1];
+}
 
 /**
  * Wie viele Blöcke im Voraus geplant werden. Muss zum Plan-Screen passen —
@@ -168,11 +185,14 @@ export async function syncPlan(
   if (!macro) return null;
 
   const from = today();
-  // Ein Plan, der ganz in der Vergangenheit liegt, wird nicht mehr angefasst.
-  const until = macro.endDate;
-  if (until === null || until < from) return null;
+  // Ein Plan, der ganz in der Vergangenheit liegt, wird nicht mehr angefasst —
+  // es sei denn, es sind Schichten für die Zukunft eingetragen. Dann gibt es
+  // wieder etwas zu planen.
+  const horizon = planningHorizon(ctx);
+  const reach = [macro.endDate, horizon].filter((d): d is IsoDate => d !== null && d !== undefined);
+  if (reach.length === 0 || reach.every((d) => d < from)) return null;
 
-  const current = planFingerprint(ctx, settings, from, until);
+  const current = planFingerprint(ctx, settings, from);
   if (macro.inputFingerprint === '') {
     // Plan von vor der Automatik: Fingerabdruck nachtragen, aber nicht neu
     // planen — sonst würde ein Update den Plan ungefragt umbauen.

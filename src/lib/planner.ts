@@ -459,7 +459,6 @@ export function planFingerprint(
   ctx: ShiftContext,
   settings: Settings,
   from: IsoDate,
-  to: IsoDate,
 ): string {
   const rotation = ctx.pattern
     ? `${ctx.pattern.anchorDate}|${ctx.pattern.sequence.join(',')}`
@@ -472,8 +471,11 @@ export function planFingerprint(
     .map((t) => `${t.id}:${t.capacity}:${t.cancelsPlanned ? 'x' : '-'}`)
     .join(',');
 
+  // Bewusst ohne obere Grenze: trägt man Schichten für den nächsten Monat ein,
+  // muss sich das auf den Plan auswirken — auch wenn er heute dort noch gar
+  // nicht hinreicht.
   const overrides = ctx.overrides
-    .filter((o) => o.date >= from && o.date <= to)
+    .filter((o) => o.date >= from)
     .sort((a, b) => a.date.localeCompare(b.date))
     .map((o) => `${o.date}:${o.shiftTypeId}`)
     .join(',');
@@ -519,6 +521,14 @@ export interface PlanInput {
    * zweite Einheit, und der Heute-Screen zeigte beide.
    */
   completed?: Array<{ date: IsoDate; type: SessionTypeKey }>;
+  /**
+   * Letzter Tag, für den überhaupt geplant wird.
+   *
+   * Ohne Rotation weiß die App nur so weit Bescheid, wie der Schichtplan
+   * eingetragen ist. Danach weiterzuplanen hieße, auf leere Tage zu raten —
+   * der Plan reicht so weit wie das Wissen, keinen Tag weiter.
+   */
+  until?: IsoDate;
 }
 
 /**
@@ -575,6 +585,7 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
   let globalCycle = 0;
 
   for (let m = 0; m < mesocycleCount; m++) {
+    if (input.until && cursor > input.until) break;
     const mesoStart = cursor;
     const meso: Mesocycle = {
       id: newId('meso'),
@@ -593,6 +604,7 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
     };
 
     for (let c = 0; c < cyclesPerMeso; c++) {
+      if (input.until && cursor > input.until) break;
       const isDeload = c >= settings.mesoLoadCycles;
 
       // Der allererste Zyklus beginnt heute und läuft bis zum Ende des laufenden
@@ -611,6 +623,7 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
       } else {
         cycleEnd = addDays(cursor, cycleLength - 1);
       }
+      if (input.until && cycleEnd > input.until) cycleEnd = input.until;
       const lengthDays = daysBetween(cursor, cycleEnd) + 1;
 
       const micro: Microcycle = {
@@ -727,11 +740,11 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
     }
 
     meso.endDate = addDays(cursor, -1);
-    mesocycles.push(meso);
+    if (microcycles.some((m) => m.mesocycleId === meso.id)) mesocycles.push(meso);
   }
 
   macrocycle.endDate = addDays(cursor, -1);
-  macrocycle.inputFingerprint = planFingerprint(ctx, settings, startDate, macrocycle.endDate);
+  macrocycle.inputFingerprint = planFingerprint(ctx, settings, startDate);
 
   return {
     macrocycle,

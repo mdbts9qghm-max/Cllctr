@@ -1554,6 +1554,73 @@ beim Öffnen da.
 
 ---
 
+## Tag für Tag statt Rotation
+
+Die ganze Planung stand auf einer Annahme: es gibt eine Rotation, die sich endlos
+wiederholt. Das stimmte, solange der Dienstplan wirklich so lief. Sobald er jeden Monat
+anders aussieht, ist man nur noch damit beschäftigt, die Rotation zu korrigieren.
+
+Also gibt es jetzt **zwei Wege**, oben auf dem Schicht-Screen umschaltbar:
+
+- **Tag für Tag** — du trägst ein, was auf dem Dienstplan steht.
+- **Nach Rotation** — wie bisher, für den Fall, dass es wieder regelmäßig wird.
+
+Abschalten löscht die Folge nicht, sie greift nur nicht mehr. Wer zwischen den Wegen
+probiert, soll sie nicht jedes Mal neu eintippen.
+
+### Ein Tag ohne Eintrag ist kein freier Tag
+
+Mit Rotation war ein Tag ohne Abweichung ein Tag aus der Folge. Ohne Rotation wäre er
+nach der alten Regel eine Freischicht gewesen — und der Plan hätte fröhlich Training auf
+Tage gelegt, von denen niemand etwas weiß. Deshalb gibt es `UNPLANNED_SHIFT`:
+*Nicht eingetragen*, Kapazität `none`, Kürzel `–`.
+
+Daraus folgt der **Planungshorizont**: `planningHorizon()` liefert ohne Rotation den
+letzten eingetragenen Tag, und der Generator hört dort auf. Vorher erzeugte er
+pflichtschuldig 15 Zyklen und meldete *„78 Einheiten fanden keinen Tag"* — technisch
+korrekt, praktisch Unsinn. Jetzt: *„12 Einheiten über 2 Zyklen."* Der Plan reicht so weit
+wie dein Wissen, keinen Tag weiter.
+
+### Monatsraster
+
+Der Dienstplan kommt als Monatsblatt, und so denkt man auch darüber. Eine Liste der
+nächsten 21 Tage kann man abarbeiten, aber nicht überblicken — und genau der Überblick
+ist der Grund, warum man draufschaut.
+
+`MonthGrid` kennt weder Schichten noch Training: sie bekommt je Tag ein Kürzel, eine
+Farbe und optional einen Punkt. Dadurch tragen Schicht- und Plan-Screen dasselbe Raster,
+ohne voneinander zu wissen.
+
+| Screen | Raster zeigt | Antippen |
+|---|---|---|
+| **Schicht** | Schichtkürzel, Punkt = Training geplant | Schicht dieses Tages setzen |
+| **Plan** | dasselbe Kürzel, Punkt orange = geplant, grau = erledigt | Tagesdetail mit Einheit, Aktionen und Schichtwechsel |
+
+Die Zyklusliste auf dem Plan-Screen ist damit entfallen. Sie war eine Liste von Listen;
+das Monatsraster sagt dasselbe auf einem Blick und lässt sich Monat für Monat
+zurückblättern.
+
+### Jede Änderung wirkt
+
+Der Fingerabdruck der Planungsgrundlage hatte eine obere Grenze — er endete am letzten
+Tag des Plans. Trug man Schichten für den **nächsten** Monat ein, änderte sich nichts,
+weil der Plan dort noch gar nicht hinreichte. Die Grenze ist gefallen: alle Abweichungen
+ab heute zählen. Damit verlängert ein neu eingetragener Monat den Plan von selbst.
+
+Ebenso gibt `syncPlan()` nicht mehr auf, wenn der Plan abgelaufen ist — solange
+Schichten in der Zukunft stehen, gibt es etwas zu planen.
+
+Durchgespielt: auf *Tag für Tag* umgestellt → alle Tage zeigen `–` → 14 Tage Freischicht
+gesetzt → Plan erzeugt: 12 Einheiten über 2 Zyklen, nichts unplatziert → den 8. auf
+Tagschicht gesetzt → *„Plan angepasst: an 4 Tagen liegt jetzt etwas anderes"*, der 8. ist
+leer, die Einheiten haben sich drumherum neu verteilt.
+
+Ohne Rotation heißt ein Zyklus **Woche** — es ist keine Rotation mehr da, auf die sich
+das Wort beziehen könnte. Die Hochrechnung *Passt das zusammen?* erscheint nur mit
+Rotation: ein Schnitt über nicht eingetragene Tage sagt nichts.
+
+---
+
 ## Entwicklung
 
 ```

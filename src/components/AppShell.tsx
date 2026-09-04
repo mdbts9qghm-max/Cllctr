@@ -107,8 +107,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const fingerprint = useLiveQuery(async () => {
     if (!ctx || !settings) return undefined;
     const macro = (await db.macrocycles.toArray()).find((m) => m.active);
-    if (!macro || macro.endDate === null) return null;
-    return planFingerprint(ctx, settings, today(), macro.endDate);
+    if (!macro) return null;
+    return planFingerprint(ctx, settings, today());
   }, [ctx, settings]);
 
   useEffect(() => {

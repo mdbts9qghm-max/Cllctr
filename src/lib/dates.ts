@@ -88,3 +88,51 @@ export function formatShort(iso: IsoDate): string {
 export function mod(n: number, m: number): number {
   return ((n % m) + m) % m;
 }
+
+/* ------------------------------------------------------------------ */
+/* Monate                                                              */
+/* ------------------------------------------------------------------ */
+
+const MONTH_NAMES = [
+  'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
+  'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
+];
+
+/** "2026-10" aus einem Datum. */
+export function monthKey(iso: IsoDate): string {
+  return iso.slice(0, 7);
+}
+
+/** "Oktober 2026" */
+export function monthLabel(key: string): string {
+  const [year, month] = key.split('-');
+  return `${MONTH_NAMES[Number(month) - 1]} ${year}`;
+}
+
+/** Monatsschlüssel um `n` Monate verschoben. */
+export function shiftMonth(key: string, n: number): string {
+  const [year, month] = key.split('-').map(Number);
+  const d = new Date(Date.UTC(year, month - 1 + n, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+export function firstOfMonth(key: string): IsoDate {
+  return `${key}-01`;
+}
+
+export function lastOfMonth(key: string): IsoDate {
+  const [year, month] = key.split('-').map(Number);
+  const d = new Date(Date.UTC(year, month, 0));
+  return toIsoDate(d);
+}
+
+/**
+ * Die Tage eines Monatsrasters, aufgefüllt bis zur vollen Woche.
+ *
+ * Beginnt am Montag vor dem Monatsersten und endet am Sonntag nach dem
+ * Monatsletzten — sonst hätte das Raster ausgefranste Ränder und die
+ * Wochentagsspalten stimmten nicht mehr.
+ */
+export function monthGridDays(key: string): IsoDate[] {
+  return dateRange(startOfWeek(firstOfMonth(key)), endOfWeek(lastOfMonth(key)));
+}

@@ -37,6 +37,30 @@ interface IndexedContext {
   fallback: ShiftType;
 }
 
+/**
+ * Der Tag, für den nichts eingetragen ist.
+ *
+ * Ohne Rotation ist ein leerer Tag keine Freischicht, sondern schlicht
+ * unbekannt — und was man nicht kennt, verplant man nicht. Deshalb `none`:
+ * der Plan reicht so weit wie der eingetragene Schichtplan, keinen Tag weiter.
+ */
+export const UNPLANNED_SHIFT: ShiftType = {
+  id: '__unplanned',
+  name: 'Nicht eingetragen',
+  short: '–',
+  startTime: null,
+  endTime: null,
+  crossesMidnight: false,
+  capacity: 'none',
+  trainingWindow: null,
+  color: '#3f3f46',
+  note: 'Für diesen Tag steht noch keine Schicht. Trag sie ein, dann schlägt der Plan etwas vor.',
+  cancelsPlanned: false,
+  pausesRoutines: false,
+  isBuiltIn: false,
+  sortOrder: 998,
+};
+
 /** Notnagel, falls eine Schichtart fehlt oder gelöscht wurde. */
 const UNKNOWN_SHIFT: ShiftType = {
   id: '__unknown',
@@ -60,7 +84,12 @@ function indexContext(ctx: ShiftContext): IndexedContext {
     typesById: new Map(ctx.shiftTypes.map((t) => [t.id, t])),
     overridesByDate: new Map(ctx.overrides.map((o) => [o.date, o])),
     pattern: ctx.pattern && ctx.pattern.sequence.length > 0 ? ctx.pattern : null,
-    fallback: ctx.shiftTypes.find((t) => t.capacity === 'full') ?? UNKNOWN_SHIFT,
+    // Mit Rotation ist ein Tag ohne Eintrag ein freier Tag. Ohne Rotation ist er
+    // schlicht nicht eingetragen — und wird deshalb auch nicht verplant.
+    fallback:
+      ctx.pattern && ctx.pattern.sequence.length > 0
+        ? (ctx.shiftTypes.find((t) => t.capacity === 'full') ?? UNKNOWN_SHIFT)
+        : UNPLANNED_SHIFT,
   };
 }
 
