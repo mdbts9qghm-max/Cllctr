@@ -8,12 +8,7 @@ import { useSettings, useShiftContext } from '@/lib/hooks';
 import { resolveShiftRange } from '@/lib/shifts';
 import { explainDay, hardContextFor } from '@/lib/planner';
 import { ENERGY_BALANCE_LABEL, nutritionFor, type NutritionPlan } from '@/lib/nutrition';
-import {
-  INTENSITY_LABEL,
-  SESSION_TYPES,
-  type DayReadiness,
-  type Session,
-} from '@/lib/types';
+import { INTENSITY_LABEL, SESSION_TYPES, type Session } from '@/lib/types';
 import { Card, Section } from '@/components/ui';
 
 /** Wie viele Tage nach vorn die Vorschau reicht. */
@@ -44,14 +39,17 @@ export default function ErnaehrungPage() {
     const from = addDays(todayIso, -8);
     const to = addDays(todayIso, AHEAD);
     const sessions = await db.sessions.where('date').between(from, to, true, true).toArray();
-    const readiness = await db.readiness.where('date').between(todayIso, to, true, true).toArray();
+    // Drei Wochen zurück: So weit reicht die Basislinie für HRV und Ruhepuls.
+    const readiness = await db.readiness
+      .where('date')
+      .between(addDays(todayIso, -21), to, true, true)
+      .toArray();
     const micros = await db.microcycles.toArray();
     return { sessions, readiness, micros };
   }, [todayIso]);
 
   if (!ctx || !settings || !data) return <p className="text-sm text-ink-faint">Lade …</p>;
 
-  const readinessByDate = new Map<string, DayReadiness>(data.readiness.map((r) => [r.date, r]));
   const days = resolveShiftRange(todayIso, addDays(todayIso, AHEAD), ctx);
 
   /** Alles, was für einen Tag zur Empfehlung führt — an einer Stelle gebaut. */
@@ -63,7 +61,7 @@ export default function ErnaehrungPage() {
     const micro = data!.micros.find((m) => m.startDate <= date && date <= m.endDate);
     const { ctx: dayCtx, allowance } = explainDay(
       day,
-      readinessByDate.get(date),
+      data!.readiness,
       settings!,
       hardContextFor(date, data!.sessions),
       micro?.isDeload ?? false,

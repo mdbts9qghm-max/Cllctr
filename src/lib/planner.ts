@@ -21,7 +21,7 @@
 import { addDays, dateRange, daysBetween, startOfWeek, today } from './dates';
 import { newId, now } from './ids';
 import { type ShiftContext, resolveShiftRange } from './shifts';
-import { plannedRecovery, sleepDebtOf } from './readiness';
+import { recoveryFor, recoveryTimeline, type RecoveryEstimate } from './recovery';
 import {
   addToLedger,
   chooseSession,
@@ -68,7 +68,7 @@ export interface PlanInput {
    * ist, bekommt heute nichts Hartes, auch wenn der alte Plan ersetzt wurde.
    */
   completed?: Array<{ date: IsoDate; type: SessionTypeKey }>;
-  /** Schlaf und Erholung je Tag. Fehlende Tage: siehe readiness.plannedRecovery. */
+  /** Die Messwerte je Tag. Was daraus folgt, rechnet `recovery.ts` aus. */
   readiness?: Map<IsoDate, DayReadiness>;
   /** Der heutige Tag. Trennt "noch planbar" von "war so". Nur für Tests gesetzt. */
   todayIso?: IsoDate;
@@ -133,9 +133,14 @@ export function planFingerprint(
   // dort morgen keine harte Einheit mehr stehen, ohne dass man etwas drückt.
   const rest = readiness
     ? [...readiness.values()]
-        .filter((r) => r.date >= from)
         .sort((a, b) => a.date.localeCompare(b.date))
-        .map((r) => `${r.date}:${r.recovery}:${r.sleepDebt}:${r.sleepHours ?? '-'}`)
+        // Bewusst **alle** Tage, auch vergangene: Die Basislinie für HRV und
+        // Ruhepuls entsteht aus den Tagen davor. Trägt man einen davon nach,
+        // ändert sich die Einschätzung der kommenden Tage mit.
+        .map(
+          (r) =>
+            `${r.date}:${r.recoveryPct ?? '-'}:${r.sleepHours ?? '-'}:${r.sleepDebtHours ?? '-'}:${r.hrvMs ?? '-'}:${r.restingHr ?? '-'}`,
+        )
         .join(',')
     : '';
 
@@ -277,6 +282,24 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
   const lastDay = input.until ?? addDays(startDate, Math.max(1, input.weeks) * 7 - 1);
   const spans = lastDay >= startDate ? weekSpans(startDate, lastDay, settings) : [];
 
+  // Die Erholung wird für den ganzen Zeitraum auf einmal geschätzt: Die
+  // Basislinie für HRV und Ruhepuls hängt an den Tagen davor, und sie an zwei
+  // Stellen leicht verschieden zu rechnen wäre der sichere Weg zu einem Plan,
+  // der etwas anderes sagt als die Anzeige daneben.
+  const allDates = lastDay >= startDate ? dateRange(startDate, lastDay) : [];
+  const nightBefore = new Map(
+    resolveShiftRange(startDate, lastDay >= startDate ? lastDay : startDate, ctx).map((d) => [
+      d.date,
+      d.afterNightShift,
+    ]),
+  );
+  const estimates: Map<IsoDate, RecoveryEstimate> = recoveryTimeline(
+    [...readiness.values()],
+    allDates,
+    todayIso,
+    (date) => nightBefore.get(date) ?? false,
+  );
+
   // Was an welchem Tag schon liegt — bleibt stehen, zählt aber für alle Regeln.
   const occupied = new Map<IsoDate, SessionTypeKey[]>();
   for (const done of input.completed ?? []) {
@@ -327,7 +350,8 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
 
     for (const day of days) {
       const row = readiness.get(day.date);
-      const recovery = plannedRecovery(day.date, row, todayIso);
+      const estimate = estimates.get(day.date);
+      const recovery = estimate?.recovery ?? 'mid';
       if (recovery === 'low') lowRecoveryDays.push(day.date);
 
       const dayCtx: DayContext = {
@@ -335,7 +359,7 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
         shift: day,
         recovery,
         sleepHours: row?.sleepHours ?? null,
-        sleepDebt: sleepDebtOf(row),
+        sleepDebt: estimate?.sleepDebt ?? 'none',
         hardLast7: hard.last7(day.date),
         hardStreakBefore: hard.streakBefore(day.date),
         hardThisWeek: ledger.hardRun + ledger.hardStrength,
@@ -559,18 +583,21 @@ export function weekBoundsFor(date: IsoDate): { start: IsoDate; length: number }
  */
 export function explainDay(
   day: ResolvedShiftDay,
-  readiness: DayReadiness | undefined,
+  /** Alle bekannten Messwerte — die Basislinie entsteht aus den Tagen davor. */
+  readiness: DayReadiness[],
   settings: Settings,
   hardBefore: { last7: number; streak: number; thisWeek: number },
   isDeloadWeek: boolean,
   todayIso: IsoDate = today(),
-): { ctx: DayContext; allowance: DayAllowance } {
+): { ctx: DayContext; allowance: DayAllowance; estimate: RecoveryEstimate } {
+  const estimate = recoveryFor(day.date, readiness, todayIso, day.afterNightShift);
+  const row = readiness.find((r) => r.date === day.date);
   const ctx: DayContext = {
     date: day.date,
     shift: day,
-    recovery: plannedRecovery(day.date, readiness, todayIso),
-    sleepHours: readiness?.sleepHours ?? null,
-    sleepDebt: sleepDebtOf(readiness),
+    recovery: estimate.recovery,
+    sleepHours: row?.sleepHours ?? null,
+    sleepDebt: estimate.sleepDebt,
     hardLast7: hardBefore.last7,
     hardStreakBefore: hardBefore.streak,
     hardThisWeek: hardBefore.thisWeek,
@@ -578,6 +605,7 @@ export function explainDay(
   };
   return {
     ctx,
+    estimate,
     allowance: dayAllowance(ctx, settings.weeklyTargets, Math.max(1, settings.maxConsecutiveHardDays ?? 2)),
   };
 }

@@ -8,7 +8,7 @@ import { addDays, formatShort, today, weekdayShort } from '@/lib/dates';
 import { useSettings, useShiftContext } from '@/lib/hooks';
 import { capacityAllows, resolveShiftDay, resolveShiftRange } from '@/lib/shifts';
 import { blockStatus, explainRestDay, explainSession } from '@/lib/explain';
-import { recoveryOf } from '@/lib/readiness';
+import { recoveryFor } from '@/lib/recovery';
 import {
   applyRescheduleProposal,
   buildRescheduleProposal,
@@ -64,9 +64,10 @@ export default function HeutePage() {
     const hasPlan = (await db.macrocycles.count()) > 0;
     const tasks = await db.tasks.where('status').equals('open').toArray();
     const souls = await db.souls.orderBy('collectedAt').reverse().limit(3).toArray();
+    // Drei Wochen zurück: So weit reicht die Basislinie für HRV und Ruhepuls.
     const readiness = await db.readiness
       .where('date')
-      .between(addDays(todayIso, -8), addDays(todayIso, LOOKAHEAD_DAYS), true, true)
+      .between(addDays(todayIso, -21), addDays(todayIso, LOOKAHEAD_DAYS), true, true)
       .toArray();
     return {
       readiness,
@@ -146,7 +147,7 @@ export default function HeutePage() {
   const budget = taskEnergyBudget(
     day,
     todaySessions,
-    recoveryOf(data.readiness.find((r) => r.date === todayIso)),
+    recoveryFor(todayIso, data.readiness, todayIso, day.afterNightShift).recovery,
   );
   const todayAppointments: Task[] = appointmentsOn(data.tasks, todayIso);
   const dailies = dailyTasks(data.tasks, todayIso);

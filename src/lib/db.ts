@@ -93,6 +93,34 @@ export class CllctrDb extends Dexie {
       settings: 'id',
       meta: 'key',
     });
+
+    // Version 3: `readiness` verliert den Index auf `recovery` — das Feld gibt
+    // es nicht mehr. Die Erholungsstufe wird geschätzt (`recovery.ts`) und
+    // nicht gespeichert; ein Index auf eine Zahl, die niemand mehr schreibt,
+    // wäre nur eine Fußangel für die nächste Abfrage.
+    this.version(3)
+      .stores({ readiness: 'date' })
+      .upgrade(async (tx) => {
+        // Bestehende Einträge auf die flache Form bringen: Die Messwerte lagen
+        // eine Version lang in einem `whoop`-Objekt, und `recovery`/`sleepDebt`
+        // waren eingetragene Stufen. Beides wandert bzw. entfällt.
+        const rows = await tx.table('readiness').toArray();
+        for (const row of rows) {
+          const whoop = row.whoop ?? {};
+          await tx.table('readiness').put({
+            date: row.date,
+            sleepHours: whoop.sleepHours ?? row.sleepHours ?? null,
+            recoveryPct: whoop.recoveryPct ?? null,
+            sleepDebtHours: whoop.sleepDebtHours ?? null,
+            strain: whoop.strain ?? null,
+            hrvMs: whoop.hrvMs ?? null,
+            restingHr: whoop.restingHr ?? null,
+            note: row.note ?? '',
+            createdAt: row.createdAt,
+            updatedAt: row.updatedAt,
+          });
+        }
+      });
   }
 }
 

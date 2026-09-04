@@ -17,7 +17,7 @@
 import { addDays, daysBetween, startOfWeek } from './dates';
 import { PROGRESSING_TYPES, progresses } from './progression';
 import { shiftAllowance } from './rules';
-import { isEmptyWhoop } from './readiness';
+import { hasMeasurement, recoveryFor } from './recovery';
 import { resolveShiftDay, type ShiftContext } from './shifts';
 import { isDaily, routineDays, routineFamily } from './tasks';
 import {
@@ -39,7 +39,7 @@ import {
 export interface SoulContext {
   sessions: Session[];
   logs: SessionLog[];
-  /** Erholungseinträge. Ohne sie ließe sich nicht belohnen, dass man hinhört. */
+  /** Die Messwerte. Ohne sie ließe sich nicht belohnen, dass man hinhört. */
   readiness: DayReadiness[];
   microcycles: Microcycle[];
   mesocycles: Mesocycle[];
@@ -145,7 +145,15 @@ function lowRecoveryRespected(ctx: SoulContext): IsoDate[] {
   }
 
   return ctx.readiness
-    .filter((r) => r.recovery === 'low' && r.date <= ctx.today)
+    .filter(
+      (r) =>
+        r.date <= ctx.today &&
+        // Die Stufe steht nicht mehr im Datensatz, sie wird geschätzt — mit
+        // derselben Funktion, die auch den Plan steuert. Eine eigene Rechnung
+        // hier hieße, dass die Seele für etwas anderes vergeben wird, als der
+        // Plan an dem Tag angenommen hat.
+        recoveryFor(r.date, ctx.readiness, ctx.today, false).recovery === 'low',
+    )
     .filter((r) => {
       const own = doneByDate.get(r.date) ?? [];
       if (own.some((s) => SESSION_TYPES[s.type].countsAsHardDay)) return false;
@@ -160,7 +168,7 @@ function lowRecoveryRespected(ctx: SoulContext): IsoDate[] {
 /** Tage mit übertragenen WHOOP-Werten. */
 function whoopDays(ctx: SoulContext): IsoDate[] {
   return ctx.readiness
-    .filter((r) => !isEmptyWhoop(r.whoop))
+    .filter((r) => hasMeasurement(r))
     .map((r) => r.date)
     .sort();
 }
@@ -591,17 +599,17 @@ export const SOUL_CATALOG: SoulDefinition[] = [
     key: 'recovery_week',
     name: 'Sieben Tage gemessen',
     description:
-      'Eine Woche am Stück die Erholung eingetragen. Ohne diese Zahl plant die App ins Blaue — mit ihr plant sie deinen Körper.',
+      'Eine Woche am Stück Werte eingetragen. Ohne Zahlen plant die App ins Blaue — mit ihnen plant sie deinen Körper.',
     rarity: 'common',
     sourceKind: 'streak',
     earned: (ctx) => {
-      const dates = new Set(ctx.readiness.map((r) => r.date));
+      const dates = new Set(ctx.readiness.filter(hasMeasurement).map((r) => r.date));
       const streak = entryStreak(dates, ctx.today);
       if (streak.length < 7) return [];
       return [{ sourceId: null, detail: `${streak.length} Tage in Folge`, date: ctx.today }];
     },
     progress: (ctx) => {
-      const dates = new Set(ctx.readiness.map((r) => r.date));
+      const dates = new Set(ctx.readiness.filter(hasMeasurement).map((r) => r.date));
       const streak = entryStreak(dates, ctx.today);
       return streak.length >= 7 ? null : { current: streak.length, target: 7, unit: 'Tage' };
     },

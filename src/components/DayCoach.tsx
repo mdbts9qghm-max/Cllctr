@@ -1,45 +1,42 @@
 'use client';
 
 /**
- * Was für einen Tag gilt: Erholung eintragen, Regel lesen, Ernährung sehen.
+ * Was für einen Tag gilt: Werte eintragen, Regel lesen, Ernährung sehen.
  *
- * Die drei gehören zusammen und stehen deshalb in einer Karte. Die Erholung ist
- * die Eingabe, die Regel ist die Folgerung daraus, die Ernährung die zweite
- * Folgerung — sie in drei Ecken der App zu verteilen hieße, den Zusammenhang zu
- * verstecken, auf den es ankommt.
+ * Eingetragen werden nur **Zahlen**. Die Erholungsstufe darunter ist die
+ * Schlussfolgerung daraus, nicht noch eine Eingabe: Drei Knöpfe neben den
+ * Messwerten wären eine zweite Wahrheit, und bei jedem Widerspruch — 28 % auf
+ * der Uhr, "mittel" im Knopf — wüsste niemand, welche gilt.
  */
 
+import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
-import { today } from '@/lib/dates';
+import { addDays, today } from '@/lib/dates';
 import { explainDay, hardContextFor } from '@/lib/planner';
 import { nutritionFor } from '@/lib/nutrition';
-import { setReadiness, setWhoop, clearReadiness, isFromWhoop } from '@/lib/readiness';
-import { useState } from 'react';
+import { setMeasurement, clearReadiness } from '@/lib/readiness';
+import { hasMeasurement, type RecoveryBasis } from '@/lib/recovery';
 import {
   INTENSITY_LABEL,
   INTENSITY_RPE,
   RECOVERY_LABEL,
   SLEEP_DEBT_LABEL,
+  type MeasurementKey,
   type Recovery,
   type ResolvedShiftDay,
   type Session,
   type SessionTypeKey,
   type Settings,
-  type SleepDebt,
-  type WhoopEntry,
 } from '@/lib/types';
 
-const RECOVERIES: Recovery[] = ['low', 'mid', 'high'];
-const DEBTS: SleepDebt[] = ['none', 'some', 'high'];
-
 /**
- * Die Felder der WHOOP-Karte, in der Reihenfolge, in der die Zahlen morgens auf
- * dem Bildschirm stehen. Die ersten drei steuern die Planung, die letzten drei
- * sind Verlauf — deshalb liegen sie hinter dem Aufklapper.
+ * Die Eingabefelder, in der Reihenfolge, in der die Zahlen morgens auf dem
+ * Bildschirm stehen. Die ersten drei steuern die Schätzung am stärksten, die
+ * letzten drei liegen deshalb hinter dem Aufklapper.
  */
-const WHOOP_FIELDS: Array<{
-  key: keyof WhoopEntry;
+const FIELDS: Array<{
+  key: MeasurementKey;
   label: string;
   unit: string;
   step: string;
@@ -49,13 +46,27 @@ const WHOOP_FIELDS: Array<{
   { key: 'recoveryPct', label: 'Recovery', unit: '%', step: '1', max: 100 },
   { key: 'sleepHours', label: 'Schlaf', unit: 'h', step: '0.25', max: 14 },
   { key: 'sleepDebtHours', label: 'Sleep Debt', unit: 'h', step: '0.25', max: 20 },
-  { key: 'strain', label: 'Day Strain', unit: '', step: '0.1', max: 21, extra: true },
   { key: 'hrvMs', label: 'HRV', unit: 'ms', step: '1', max: 300, extra: true },
   { key: 'restingHr', label: 'Ruhepuls', unit: 'bpm', step: '1', max: 120, extra: true },
+  { key: 'strain', label: 'Day Strain', unit: '', step: '0.1', max: 21, extra: true },
 ];
 
 const numberInput =
   'w-full rounded border border-line-strong bg-surface-2 px-2 py-1.5 text-sm text-ink tabular outline-none focus:border-ember';
+
+/** Ein Punkt in der Akzentfarbe für niedrig, gedämpft für alles andere. */
+const RECOVERY_TONE: Record<Recovery, string> = {
+  low: 'text-ember',
+  mid: 'text-ink',
+  high: 'text-ok',
+};
+
+/** Wie sicher die Stufe ist — steht als Kleingedrucktes daneben. */
+const BASIS_LABEL: Record<RecoveryBasis, string> = {
+  measured: 'gemessen',
+  derived: 'geschätzt',
+  assumed: 'angenommen',
+};
 
 export function DayCoach({
   day,
@@ -75,25 +86,35 @@ export function DayCoach({
   isDeloadWeek?: boolean;
   /**
    * Zeigt, was der Tag hergibt. Auf dem Heute-Screen aus: dort steht die
-   * Einheit selbst darunter und begründet sich über `planReason` schon selbst —
-   * die Regel ein zweites Mal darüber zu stellen, sagt nichts Neues und
-   * schiebt das, worum es geht, nach unten.
+   * Einheit selbst darunter und begründet sich über `planReason` schon selbst.
    */
   showRules?: boolean;
   /** Zeigt die Ernährungsempfehlung. Auf dem Heute-Screen aus — dafür gibt es einen eigenen Tab. */
   showNutrition?: boolean;
 }) {
-  // useLiveQuery liefert undefined sowohl beim Laden als auch, wenn es für den
-  // Tag keinen Eintrag gibt. Beides führt zum selben Ergebnis — dem Normalfall
-  // "mittel" —, deshalb wird hier nicht auf das Laden gewartet.
-  const readiness = useLiveQuery(() => db.readiness.get(day.date), [day.date]);
+  /**
+   * Nicht nur der eine Tag, sondern das Fenster davor: Die Basislinie für HRV
+   * und Ruhepuls entsteht aus den letzten drei Wochen. Ohne sie wäre eine HRV
+   * von 45 ms eine Zahl ohne Bedeutung.
+   */
+  const readiness = useLiveQuery(
+    () =>
+      db.readiness
+        .where('date')
+        .between(addDays(day.date, -21), day.date, true, true)
+        .toArray(),
+    [day.date],
+  );
 
   const [showExtra, setShowExtra] = useState(false);
   const todayIso = today();
+  const rows = readiness ?? [];
+  const row = rows.find((r) => r.date === day.date);
+
   const hard = hardContextFor(day.date, allSessions);
-  const { ctx, allowance } = explainDay(
+  const { ctx, allowance, estimate } = explainDay(
     day,
-    readiness ?? undefined,
+    rows,
     settings,
     hard,
     isDeloadWeek,
@@ -104,37 +125,25 @@ export function DayCoach({
     allowance,
     sessions.filter((s) => s.status !== 'skipped').map((s) => s.type),
   );
-  const entered = readiness !== undefined && readiness !== null;
-  const whoop = readiness?.whoop ?? null;
-  const fromWhoop = isFromWhoop(readiness ?? undefined);
 
   return (
     <div className="space-y-3">
-      {/* --- Erholung eintragen ----------------------------------------- */}
+      {/* --- Werte eintragen -------------------------------------------- */}
       <div className="rounded border border-line bg-surface p-3">
         <div className="mb-2 flex items-baseline justify-between gap-2">
-          <p className="text-xs uppercase tracking-widest text-ink-faint">Erholung</p>
-          {entered ? (
+          <p className="text-xs uppercase tracking-widest text-ink-faint">Werte</p>
+          {hasMeasurement(row) ? (
             <button
               onClick={() => void clearReadiness(day.date)}
               className="text-[11px] text-ink-faint underline decoration-dotted hover:text-ink"
             >
-              Eintrag löschen
+              Werte löschen
             </button>
-          ) : (
-            <span className="text-[11px] text-ink-faint">
-              {day.date > todayIso
-                ? 'nicht eingetragen — geplant, als wärst du erholt'
-                : 'nicht eingetragen — gilt als mittel'}
-            </span>
-          )}
+          ) : null}
         </div>
 
-        {/* Die drei Zahlen von der Uhr. Sie stehen zuerst, weil sie im Alltag
-            die eigentliche Eingabe sind — die Einschätzung darunter ist der
-            Ausweg für Tage ohne Uhr oder für einen Wert, der nicht passt. */}
         <div className="grid grid-cols-3 gap-2">
-          {WHOOP_FIELDS.filter((f) => !f.extra || showExtra).map((f) => (
+          {FIELDS.filter((f) => !f.extra || showExtra).map((f) => (
             <label key={f.key} className="block">
               <span className="mb-1 block truncate text-[11px] uppercase tracking-widest text-ink-faint">
                 {f.label}
@@ -147,12 +156,14 @@ export function DayCoach({
                 min={0}
                 max={f.max}
                 placeholder="–"
-                value={whoop?.[f.key] ?? ''}
+                value={row?.[f.key] ?? ''}
                 onChange={(e) => {
                   const raw = e.target.value.trim();
-                  void setWhoop(day.date, {
-                    [f.key]: raw === '' ? null : Math.max(0, Math.min(f.max, Number(raw) || 0)),
-                  });
+                  void setMeasurement(
+                    day.date,
+                    f.key,
+                    raw === '' ? null : Math.max(0, Math.min(f.max, Number(raw) || 0)),
+                  );
                 }}
                 className={numberInput}
               />
@@ -164,111 +175,100 @@ export function DayCoach({
           onClick={() => setShowExtra((v) => !v)}
           className="mt-2 text-[11px] text-ink-faint underline decoration-dotted hover:text-ink"
         >
-          {showExtra ? 'Weniger' : 'Strain, HRV, Ruhepuls'}
+          {showExtra ? 'Weniger' : 'HRV, Ruhepuls, Strain'}
         </button>
 
+        {/* Die Schlussfolgerung — keine Eingabe, deshalb auch kein Knopf. */}
         <div className="mt-3 border-t border-line pt-3">
-          <p className="mb-2 text-[11px] text-ink-faint">
-            {fromWhoop
-              ? `Aus WHOOP übernommen: ${whoop?.recoveryPct} % — das ist ${RECOVERY_LABEL[readiness!.recovery].toLowerCase()}. Antippen überschreibt.`
-              : 'Ohne Uhr: selbst einschätzen.'}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {RECOVERIES.map((r) => (
-              <button
-                key={r}
-                onClick={() => void setReadiness(day.date, { recovery: r })}
-                aria-pressed={entered && readiness?.recovery === r}
-                className={`rounded border px-2.5 py-1 text-sm ${
-                  entered && readiness?.recovery === r
-                    ? 'border-ember text-ember'
-                    : 'border-line-strong text-ink hover:border-ember'
-                }`}
-              >
-                {RECOVERY_LABEL[r]}
-              </button>
-            ))}
-            <select
-              value={readiness?.sleepDebt ?? 'none'}
-              onChange={(e) => void setReadiness(day.date, { sleepDebt: e.target.value as SleepDebt })}
-              className="rounded border border-line-strong bg-surface-2 px-2 py-1 text-sm text-ink outline-none focus:border-ember"
-              aria-label="Schlafschuld"
-            >
-              {DEBTS.map((d) => (
-                <option key={d} value={d}>
-                  Schuld: {SLEEP_DEBT_LABEL[d]}
-                </option>
-              ))}
-            </select>
+          <div className="flex items-baseline justify-between gap-2">
+            <p className={`text-sm font-medium ${RECOVERY_TONE[estimate.recovery]}`}>
+              Erholung {RECOVERY_LABEL[estimate.recovery].toLowerCase()}
+            </p>
+            <span className="shrink-0 text-[11px] text-ink-faint">
+              {BASIS_LABEL[estimate.basis]}
+              {estimate.sleepDebt !== 'none'
+                ? ` · Schlafschuld ${SLEEP_DEBT_LABEL[estimate.sleepDebt].toLowerCase()}`
+                : ''}
+            </span>
           </div>
+          <p className="mt-1 text-xs leading-relaxed text-ink-muted">{estimate.headline}</p>
+          {estimate.reasons.length > 0 ? (
+            <ul className="mt-1.5 space-y-0.5">
+              {estimate.reasons.map((r, i) => (
+                <li key={i} className="text-[11px] leading-relaxed text-ink-faint">
+                  {r}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       </div>
 
       {/* --- Was die Regeln sagen --------------------------------------- */}
       {showRules ? (
-      <div className="rounded border border-line bg-surface p-3">
-        <div className="mb-2 flex items-baseline justify-between gap-2">
-          <p className="text-xs uppercase tracking-widest text-ink-faint">Was heute geht</p>
-          <span className="text-[11px] text-ink-faint">
-            {allowance.cap === null
-              ? 'Ruhetag'
-              : `${INTENSITY_LABEL[allowance.cap]} · ${INTENSITY_RPE[allowance.cap]}`}
-          </span>
+        <div className="rounded border border-line bg-surface p-3">
+          <div className="mb-2 flex items-baseline justify-between gap-2">
+            <p className="text-xs uppercase tracking-widest text-ink-faint">Was heute geht</p>
+            <span className="text-[11px] text-ink-faint">
+              {allowance.cap === null
+                ? 'Ruhetag'
+                : `${INTENSITY_LABEL[allowance.cap]} · ${INTENSITY_RPE[allowance.cap]}`}
+            </span>
+          </div>
+          <p className="text-sm leading-relaxed text-ink">{allowance.reason}</p>
+          {allowance.window ? (
+            <p className="mt-1 text-xs text-ink-muted">Zeitfenster: {allowance.window}</p>
+          ) : null}
+          {allowance.limits.length > 0 ? (
+            <ul className="mt-2 space-y-1">
+              {allowance.limits.map((limit, i) => (
+                <li key={i} className="text-xs leading-relaxed text-ember">
+                  {limit}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {hard.streak > 0 || hard.last7 > 0 ? (
+            <p className="mt-2 text-[11px] text-ink-faint tabular">
+              {hard.last7 === 1 ? '1 harter Tag' : `${hard.last7} harte Tage`} in den letzten 7 ·{' '}
+              {hard.streak} direkt davor · {hard.thisWeek} diese Woche
+            </p>
+          ) : null}
         </div>
-        <p className="text-sm leading-relaxed text-ink">{allowance.reason}</p>
-        {allowance.window ? (
-          <p className="mt-1 text-xs text-ink-muted">Zeitfenster: {allowance.window}</p>
-        ) : null}
-        {allowance.limits.length > 0 ? (
-          <ul className="mt-2 space-y-1">
-            {allowance.limits.map((limit, i) => (
-              <li key={i} className="text-xs leading-relaxed text-ember">
-                {limit}
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        {hard.streak > 0 || hard.last7 > 0 ? (
-          <p className="mt-2 text-[11px] text-ink-faint tabular">
-            {hard.last7 === 1 ? '1 harter Tag' : `${hard.last7} harte Tage`} in den letzten 7 ·{' '}
-            {hard.streak} direkt davor · {hard.thisWeek} diese Woche
-          </p>
-        ) : null}
-      </div>
       ) : null}
 
       {/* --- Ernährung --------------------------------------------------- */}
       {showNutrition ? (
-      <div className="rounded border border-line bg-surface p-3">
-        <p className="mb-2 text-xs uppercase tracking-widest text-ink-faint">Ernährung</p>
-        <p className="text-sm leading-relaxed text-ink">{nutrition.headline}</p>
+        <div className="rounded border border-line bg-surface p-3">
+          <p className="mb-2 text-xs uppercase tracking-widest text-ink-faint">Ernährung</p>
+          <p className="text-sm leading-relaxed text-ink">{nutrition.headline}</p>
 
-        <ul className="mt-2 space-y-1">
-          {nutrition.macros.map((line, i) => (
-            <li key={i} className="text-xs leading-relaxed text-ink-muted">
-              {line}
-            </li>
-          ))}
-        </ul>
-
-        <div className="mt-3 space-y-1">
-          {nutrition.timing.map((t, i) => (
-            <p key={i} className="text-xs leading-relaxed text-ink">
-              <span className="text-ink-muted">{t.when}:</span> {t.what}
-            </p>
-          ))}
-        </div>
-
-        {nutrition.notes.length > 0 ? (
-          <ul className="mt-3 space-y-1 border-t border-line pt-2">
-            {nutrition.notes.map((note, i) => (
-              <li key={i} className="text-xs leading-relaxed text-ink-faint">
-                {note}
+          <ul className="mt-2 space-y-1">
+            {nutrition.macros.map((line, i) => (
+              <li key={i} className="text-xs leading-relaxed text-ink-muted">
+                {line}
               </li>
             ))}
           </ul>
-        ) : null}
-      </div>
+
+          <div className="mt-3 space-y-1">
+            {nutrition.timing.map((t, i) => (
+              <p key={i} className="text-xs leading-relaxed text-ink">
+                <span className="text-ink-muted">{t.when}:</span> {t.what}
+              </p>
+            ))}
+          </div>
+
+          {nutrition.notes.length > 0 ? (
+            <ul className="mt-3 space-y-1 border-t border-line pt-2">
+              {nutrition.notes.map((note, i) => (
+                <li key={i} className="text-xs leading-relaxed text-ink-faint">
+                  {note}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

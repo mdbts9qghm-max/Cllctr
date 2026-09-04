@@ -12,7 +12,7 @@ export type IsoDate = string;
 export type IsoDateTime = string;
 
 /** Version des Schemas im Export. Wird bei jeder Änderung am Modell hochgezählt. */
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 
 /* ------------------------------------------------------------------ */
 /* Schicht                                                             */
@@ -98,9 +98,11 @@ export const INTENSITY_RPE: Record<Intensity, string> = {
  * Erholungszustand des Tages. Steht in der Priorität **über** der Schicht:
  * Ein freier Tag mit schlechter Erholung ist kein harter Tag.
  *
- * Wird von Hand eingetragen — die App hat keinen Server und keinen Zugriff auf
- * eine Uhr. Ohne Eintrag gilt `mid`: der Plan geht vom Normalfall aus, statt
- * eine Zahl zu erfinden.
+ * **Wird nicht eingetragen, sondern geschätzt.** Aus den Zahlen, die für den Tag
+ * vorliegen — Recovery, Schlaf, HRV, Ruhepuls — leitet `recovery.ts` diese
+ * Stufe ab. Eine Auswahl "niedrig/mittel/hoch" von Hand wäre eine zweite
+ * Wahrheit neben den Messwerten, und bei jedem Widerspruch wüsste niemand,
+ * welche gilt.
  */
 export type Recovery = 'low' | 'mid' | 'high';
 
@@ -108,12 +110,6 @@ export const RECOVERY_LABEL: Record<Recovery, string> = {
   low: 'Niedrig',
   mid: 'Mittel',
   high: 'Hoch',
-};
-
-export const RECOVERY_SHORT: Record<Recovery, string> = {
-  low: 'niedrig',
-  mid: 'mittel',
-  high: 'hoch',
 };
 
 /** Grobe Schlafschuld der letzten Tage. */
@@ -136,7 +132,7 @@ export const DEFAULT_SLEEP_DEBT: SleepDebt = 'none';
  * dem Handgelenk zu widersprechen — und dann stünde in der App etwas anderes
  * als auf der Uhr.
  */
-export function recoveryFromWhoop(pct: number): Recovery {
+export function recoveryFromPct(pct: number): Recovery {
   if (pct <= 33) return 'low';
   if (pct <= 66) return 'mid';
   return 'high';
@@ -155,53 +151,51 @@ export function sleepDebtFromHours(hours: number): SleepDebt {
 }
 
 /**
- * Was an einem Tag über Schlaf und Erholung bekannt ist.
+ * Was an einem Tag **gemessen** wurde.
  *
- * Pro Tag höchstens ein Datensatz, Primärschlüssel ist das Datum. Fehlt er,
- * gilt der Normalfall (`mid`, keine Schlafschuld) — der Plan wartet nicht auf
- * eine Eingabe, er nimmt sie nur ernst, wenn sie da ist.
+ * Nur Zahlen, keine Einschätzungen: Erholung und Schlafschuld stehen bewusst
+ * nicht hier, sie werden aus diesen Werten abgeleitet (`recovery.ts`). Eine
+ * gespeicherte Stufe würde veralten, sobald sich die persönliche Basislinie
+ * verschiebt — dann stünde in der Datenbank eine Einschätzung, die aus Zahlen
+ * stammt, die inzwischen etwas anderes bedeuten.
+ *
+ * Die Werte liegen flach nebeneinander und nicht in einem `whoop`-Block: Ob
+ * eine Zahl von der Uhr kommt oder von Hand geschätzt ist, ändert nichts daran,
+ * was sie aussagt.
+ *
+ * Pro Tag höchstens ein Datensatz, Primärschlüssel ist das Datum. Alle Felder
+ * dürfen leer sein.
  */
 export interface DayReadiness {
   date: IsoDate;
-  recovery: Recovery;
-  /** Schlafdauer der letzten Nacht in Stunden, null wenn nicht eingetragen. */
+  /** Schlafdauer der letzten Nacht in Stunden. */
   sleepHours: number | null;
-  sleepDebt: SleepDebt;
-  /**
-   * Die Zahlen, wie sie auf der Uhr stehen.
-   *
-   * Roh gespeichert und nicht nur als abgeleitete Stufe: Die Stufe ist eine
-   * Vereinfachung für die Planung, aber 68 % und 34 % sind beide "mittel bis
-   * hoch" und erzählen doch Verschiedenes. Wer die Rohwerte behält, kann später
-   * anders auswerten; wer nur die Stufe behält, hat die Zahl für immer verloren.
-   */
-  whoop: WhoopEntry | null;
-  note: string;
-  createdAt: IsoDateTime;
-  updatedAt: IsoDateTime;
-}
-
-/**
- * Ein Tageseintrag aus WHOOP, von Hand übertragen.
- *
- * Es gibt keine Schnittstelle: Cllctr hat keinen Server und keine API-Schlüssel,
- * das ist der Kern des Projekts. Übertragen werden deshalb die vier Zahlen, die
- * morgens ohnehin auf dem Bildschirm stehen — mehr braucht die Planung nicht.
- */
-export interface WhoopEntry {
-  /** Recovery in Prozent, 0–100. WHOOPs eigene Farbgrenzen: rot ≤33, gelb ≤66, grün darüber. */
+  /** Recovery in Prozent, 0–100 — WHOOPs eigener Wert. */
   recoveryPct: number | null;
-  /** Schlafdauer in Stunden. */
-  sleepHours: number | null;
   /** Sleep Debt in Stunden, wie WHOOP sie ausweist. */
   sleepDebtHours: number | null;
-  /** Day Strain 0–21. Nur Verlauf, die Planung nutzt ihn nicht. */
+  /** Day Strain 0–21. Verlauf; geht nicht in die Schätzung ein. */
   strain: number | null;
   /** Herzfrequenzvariabilität in Millisekunden. */
   hrvMs: number | null;
   /** Ruhepuls. */
   restingHr: number | null;
+  note: string;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
 }
+
+/** Die messbaren Felder eines Tages, in der Reihenfolge der Eingabe. */
+export const MEASUREMENT_KEYS = [
+  'recoveryPct',
+  'sleepHours',
+  'sleepDebtHours',
+  'strain',
+  'hrvMs',
+  'restingHr',
+] as const;
+
+export type MeasurementKey = (typeof MEASUREMENT_KEYS)[number];
 
 /**
  * Eine Schichtart. Die fünf Standardarten kommen aus dem Seed, du kannst
