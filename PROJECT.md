@@ -2147,6 +2147,62 @@ Die Kopfzeile springt auf „Tag 7".
 
 ---
 
+## Die Sammlung lässt sich zurücksetzen
+
+Unter *Seelen* gibt es jetzt **Fortschritt zurücksetzen**.
+
+### Warum das nicht "Tabelle leeren" heißt
+
+Die Auswertung ist absichtlich idempotent: Sie darf jederzeit laufen und legt an, was fehlt.
+Das ist gut — so geht keine Seele verloren, die verdient wurde, während die App zu war. Es
+macht ein Zurücksetzen aber unmöglich, wenn man nur die Tabelle leert: Beim nächsten
+Durchlauf stünde alles wieder da, weil die Grundlage — Logbuch, Zyklen, Bestwerte —
+unverändert ist.
+
+Deshalb setzt das Zurücksetzen zusätzlich einen **Stichtag** (`meta['souls.resetAt']`). Ab
+dann sieht die Auswertung nur noch die Zeit danach.
+
+### Der Schnitt liegt am Tagesende
+
+`hit.date > resetAt`, nicht `>=`. Beim ersten Versuch lag der Schnitt am Tagesanfang, und beim
+Durchspielen kam prompt heraus: Eine Einheit, die am selben Tag protokolliert wurde, brachte
+ihre Seele im selben Moment wieder herein — das Zurücksetzen sah aus, als hätte es nicht
+funktioniert.
+
+Jetzt gilt eine Regel ohne Ausnahme: **Ab morgen fängt die Sammlung an.** Auch Seelen, die
+einen Zustand beschreiben (alle Bereiche des Wegs stehen, jede Kernart auf Stufe 5) und
+deshalb den heutigen Tag als Datum tragen, fallen am Stichtag nicht an. Am Tag danach kommen
+sie zurück, weil sie noch zutreffen — sie wegzunehmen hieße, etwas zu behaupten, das nicht
+stimmt.
+
+### Beschnitten wird der Kontext, nicht das Ergebnis
+
+`buildContext()` filtert Sessions, Protokolle, Erholungseinträge, Zyklen und Bestwerte auf die
+Zeit nach dem Stichtag. Würde stattdessen nur das Ergebnis gefiltert, zeigte der Fortschritt
+weiter „12 von 14 Tagen" für eine Seele, die aus lauter alten Tagen besteht und deshalb nie
+vergeben würde. Wer zurücksetzt, soll denselben Ausschnitt sehen, aus dem die App auch
+entscheidet.
+
+Aufgaben und Wegbereiche bleiben ungefiltert: Sie tragen keinen Zeitpunkt, sondern einen
+Zustand.
+
+### Umkehrbar, soweit es geht
+
+Das Löschen der eingesammelten Seelen ist endgültig — die Datensätze sind weg. Der **Stichtag**
+lässt sich aufheben (*Stichtag aufheben*); dann zählt die ganze Vergangenheit wieder und die
+Auswertung legt beim nächsten Durchlauf an, was sie findet. Der Verlauf selbst wird nie
+angefasst: Logbuch, Stufen und Bestwerte bleiben, wie sie sind.
+
+### Geprüft
+
+Im Browser mit gestellter Uhr: Einheit am 10. September protokolliert → *Der erste Schritt*
+im Vault. Zurückgesetzt → Vault leer, Meldung „Der Stichtag steht auf Do, 10. Sep — ab morgen
+zählt neu". Uhr auf den 11. → Vault bleibt leer, das alte Ereignis kommt nicht zurück. Neue
+Einheit am 11. protokolliert → *Der erste Schritt* fällt frisch an, datiert auf den 11.
+Danach *Stichtag aufheben* → die Seele vom 10. ist wieder da.
+
+---
+
 ## Entwicklung
 
 ```

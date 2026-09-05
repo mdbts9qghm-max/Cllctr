@@ -1,12 +1,13 @@
 'use client';
 
+import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 import { formatShort } from '@/lib/dates';
-import { getSoulsInReach } from '@/lib/soul-store';
+import { clearSoulsReset, getSoulsInReach, resetSouls, soulsResetAt, syncSouls } from '@/lib/soul-store';
 import { RARITY_ORDER, SOUL_CATALOG } from '@/lib/souls';
 import { RARITY_LABEL, type Soul, type SoulRarity } from '@/lib/types';
-import { Mark, Section } from '@/components/ui';
+import { Button, Card, Mark, Notice, Section } from '@/components/ui';
 
 /**
  * Seltenheit über eine einzige Akzentfarbe abgestuft, nicht über einen
@@ -31,8 +32,56 @@ const RARITY_VARIANT: Record<SoulRarity, 'solid' | 'half' | 'outline'> = {
 export default function SeelenPage() {
   const souls = useLiveQuery(() => db.souls.toArray(), []);
   const inReach = useLiveQuery(() => getSoulsInReach(6), []);
+  const resetAt = useLiveQuery(() => soulsResetAt(), []);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
 
-  if (!souls || !inReach) return <p className="text-sm text-ink-faint">Lade …</p>;
+  /**
+   * Zurücksetzen und sofort neu nachrechnen.
+   *
+   * Das Nachrechnen gehört dazu, sonst stünde die Seite bis zum nächsten Start
+   * leer da — und was danach zurückkommt, ist genau die Aussage, die der Nutzer
+   * verstehen soll: Ereignisse sind weg, Zustände bleiben.
+   */
+  async function doReset() {
+    setBusy(true);
+    try {
+      const { removed, resetAt: from } = await resetSouls();
+      const back = await syncSouls();
+      setMessage(
+        `${removed} ${removed === 1 ? 'Seele' : 'Seelen'} entfernt. Der Stichtag steht auf ` +
+          `${formatShort(from)} — ab morgen zählt neu.` +
+          (back.length > 0
+            ? ` ${back.length} ${back.length === 1 ? 'ist' : 'sind'} sofort wieder angefallen.`
+            : ''),
+      );
+      setConfirmReset(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function undoReset() {
+    setBusy(true);
+    try {
+      await clearSoulsReset();
+      const back = await syncSouls();
+      setMessage(
+        back.length > 0
+          ? `Stichtag aufgehoben — ${back.length} ${
+              back.length === 1 ? 'Seele aus der Zeit davor ist' : 'Seelen aus der Zeit davor sind'
+            } zurück.`
+          : 'Stichtag aufgehoben. Die ganze Vergangenheit zählt wieder.',
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!souls || !inReach || resetAt === undefined) {
+    return <p className="text-sm text-ink-faint">Lade …</p>;
+  }
 
   const collectedKeys = new Set(souls.map((s) => s.key));
   const byRarity = (r: SoulRarity) => souls.filter((s) => s.rarity === r).length;
@@ -68,6 +117,11 @@ export default function SeelenPage() {
 
   return (
     <>
+      {message ? (
+        <div className="mb-6">
+          <Notice tone="ok">{message}</Notice>
+        </div>
+      ) : null}
       <section className="mb-8">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink-faint">
           Soul Vault
@@ -183,6 +237,58 @@ export default function SeelenPage() {
           </div>
         </Section>
       ) : null}
+
+      <Section
+        title="Fortschritt zurücksetzen"
+        hint="Löscht alles Eingesammelte und setzt einen Stichtag: Ab dann zählt für die Seelen nur noch, was danach passiert."
+      >
+        <Card>
+          {resetAt ? (
+            <p className="mb-3 text-sm leading-relaxed text-ink-muted">
+              Stichtag: {formatShort(resetAt)}. Gezählt wird, was danach passiert — alles
+              davor ist außen vor, auch beim Fortschritt zu den noch offenen Seelen.
+            </p>
+          ) : (
+            <p className="mb-3 text-sm leading-relaxed text-ink-muted">
+              Die Sammlung zählt seit dem Anfang.
+            </p>
+          )}
+
+          <p className="mb-4 text-xs leading-relaxed text-ink-faint">
+            Der Schnitt liegt am Tagesende: Ab morgen fängt die Sammlung an. Seelen, die einen
+            Zustand beschreiben — alle Bereiche des Wegs stehen, eine Einheitsart auf Stufe 5 —
+            kommen dann wieder, weil sie noch zutreffen. Dein Verlauf bleibt unangetastet:
+            Logbuch, Stufen und Bestwerte fasst das Zurücksetzen nicht an.
+          </p>
+
+          {confirmReset ? (
+            <div className="rounded border border-danger/50 bg-danger/5 p-3">
+              <p className="mb-3 text-sm leading-relaxed text-ink">
+                {souls.length === 0
+                  ? 'Es ist nichts eingesammelt. Gesetzt wird nur der Stichtag auf heute — ab morgen zählt neu.'
+                  : `${souls.length} ${souls.length === 1 ? 'Seele wird' : 'Seelen werden'} gelöscht. Das lässt sich nicht rückgängig machen — nur der Stichtag lässt sich später wieder aufheben.`}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="danger" onClick={() => void doReset()} disabled={busy}>
+                  {busy ? 'Setze zurück …' : 'Ja, zurücksetzen'}
+                </Button>
+                <Button onClick={() => setConfirmReset(false)} disabled={busy}>
+                  Abbrechen
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => setConfirmReset(true)}>Fortschritt zurücksetzen</Button>
+              {resetAt ? (
+                <Button onClick={() => void undoReset()} disabled={busy}>
+                  Stichtag aufheben
+                </Button>
+              ) : null}
+            </div>
+          )}
+        </Card>
+      </Section>
     </>
   );
 }
