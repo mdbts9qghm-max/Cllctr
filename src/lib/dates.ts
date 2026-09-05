@@ -1,35 +1,33 @@
 /**
- * Datums-Hilfen. Bewusst ohne Bibliothek: wir rechnen ausschließlich mit
- * lokalen Kalendertagen als "YYYY-MM-DD"-Strings, nie mit UTC-Zeitstempeln.
- * Das vermeidet die klassischen Zeitzonen-Verschiebungen um einen Tag.
+ * Kalenderarithmetik auf lokalen Tagen.
+ *
+ * Alle Funktionen rechnen mit `IsoDate`-Zeichenketten und der lokalen Zeitzone.
+ * Ein Trainingstag ist ein Kalendertag — wer ihn als UTC-Zeitstempel behandelt,
+ * verschiebt ihn irgendwann über Mitternacht und wundert sich, warum der Long
+ * Run im Kalender einen Tag zu früh steht.
  */
 
 import type { IsoDate } from './types';
 
-const MS_PER_DAY = 86_400_000;
-
-/** Heute als "YYYY-MM-DD" in der lokalen Zeitzone. */
 export function today(): IsoDate {
   return toIsoDate(new Date());
 }
 
 export function toIsoDate(d: Date): IsoDate {
   const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
+  const m = `${d.getMonth() + 1}`.padStart(2, '0');
+  const day = `${d.getDate()}`.padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
 
-/** Parst "YYYY-MM-DD" zu einem lokalen Date auf Mitternacht. */
+/** Mittag statt Mitternacht: So kippt kein Tag durch die Sommerzeit. */
 export function fromIsoDate(iso: IsoDate): Date {
   const [y, m, d] = iso.split('-').map(Number);
-  return new Date(y, m - 1, d);
+  return new Date(y, m - 1, d, 12, 0, 0, 0);
 }
 
 export function isValidIsoDate(value: unknown): value is IsoDate {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const d = fromIsoDate(value);
-  return !Number.isNaN(d.getTime()) && toIsoDate(d) === value;
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
 export function addDays(iso: IsoDate, days: number): IsoDate {
@@ -38,82 +36,106 @@ export function addDays(iso: IsoDate, days: number): IsoDate {
   return toIsoDate(d);
 }
 
-/** Ganze Kalendertage zwischen zwei Daten (b - a). Kann negativ sein. */
+/** Ganze Tage von a nach b. Positiv, wenn b später liegt. */
 export function daysBetween(a: IsoDate, b: IsoDate): number {
-  const da = fromIsoDate(a);
-  const db = fromIsoDate(b);
-  // Auf Mittag normalisieren, damit Sommerzeit-Wechsel nicht zu 0.96 Tagen führen.
-  da.setHours(12, 0, 0, 0);
-  db.setHours(12, 0, 0, 0);
-  return Math.round((db.getTime() - da.getTime()) / MS_PER_DAY);
+  const ms = fromIsoDate(b).getTime() - fromIsoDate(a).getTime();
+  return Math.round(ms / 86_400_000);
 }
 
-/** Montag der Woche, in der iso liegt. */
+/** Montag der Woche, in der dieses Datum liegt. */
 export function startOfWeek(iso: IsoDate): IsoDate {
   const d = fromIsoDate(iso);
-  const dow = d.getDay(); // 0 = Sonntag
-  const diff = dow === 0 ? -6 : 1 - dow;
-  return addDays(iso, diff);
+  // getDay(): 0 = Sonntag. Der Sonntag gehört zur Woche davor.
+  const offset = (d.getDay() + 6) % 7;
+  return addDays(iso, -offset);
 }
 
 export function endOfWeek(iso: IsoDate): IsoDate {
   return addDays(startOfWeek(iso), 6);
 }
 
-/** Alle Tage von start bis end (beide inklusive). */
 export function dateRange(start: IsoDate, end: IsoDate): IsoDate[] {
   const out: IsoDate[] = [];
-  const total = daysBetween(start, end);
-  for (let i = 0; i <= total; i++) out.push(addDays(start, i));
+  let cursor = start;
+  // Obergrenze gegen Endlosschleifen bei vertauschten Grenzen.
+  for (let i = 0; cursor <= end && i < 4000; i++) {
+    out.push(cursor);
+    cursor = addDays(cursor, 1);
+  }
   return out;
 }
 
-const WEEKDAYS_SHORT = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
-const MONTHS_SHORT = [
-  'Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez',
+/** Die letzten n Tage einschließlich heute, aufsteigend. */
+export function lastDays(n: number, reference: IsoDate = today()): IsoDate[] {
+  return dateRange(addDays(reference, -(n - 1)), reference);
+}
+
+const WEEKDAYS = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+const WEEKDAYS_LONG = [
+  'Sonntag',
+  'Montag',
+  'Dienstag',
+  'Mittwoch',
+  'Donnerstag',
+  'Freitag',
+  'Samstag',
 ];
-
-export function weekdayShort(iso: IsoDate): string {
-  return WEEKDAYS_SHORT[fromIsoDate(iso).getDay()];
-}
-
-/** "Do, 21. Aug" */
-export function formatShort(iso: IsoDate): string {
-  const d = fromIsoDate(iso);
-  return `${WEEKDAYS_SHORT[d.getDay()]}, ${d.getDate()}. ${MONTHS_SHORT[d.getMonth()]}`;
-}
-
-/** Positiver Modulo — anders als % in JS auch bei negativen Zahlen korrekt. */
-export function mod(n: number, m: number): number {
-  return ((n % m) + m) % m;
-}
-
-/* ------------------------------------------------------------------ */
-/* Monate                                                              */
-/* ------------------------------------------------------------------ */
-
-const MONTH_NAMES = [
+const MONTHS = [
   'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
   'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
 ];
 
-/** "2026-10" aus einem Datum. */
+export function weekdayShort(iso: IsoDate): string {
+  return WEEKDAYS[fromIsoDate(iso).getDay()];
+}
+
+export function weekdayLong(iso: IsoDate): string {
+  return WEEKDAYS_LONG[fromIsoDate(iso).getDay()];
+}
+
+/** "7. Sep" */
+export function formatShort(iso: IsoDate): string {
+  const d = fromIsoDate(iso);
+  return `${d.getDate()}. ${MONTHS[d.getMonth()].slice(0, 3)}`;
+}
+
+/** "Montag, 7. September" */
+export function formatLong(iso: IsoDate): string {
+  const d = fromIsoDate(iso);
+  return `${WEEKDAYS_LONG[d.getDay()]}, ${d.getDate()}. ${MONTHS[d.getMonth()]}`;
+}
+
+/**
+ * ISO-Kalenderwoche.
+ *
+ * Nach ISO 8601: Die Woche gehört zu dem Jahr, in dem ihr Donnerstag liegt.
+ * Die naive Rechnung „Tage seit dem 1. Januar durch 7" liegt am Jahreswechsel
+ * regelmäßig daneben.
+ */
+export function isoWeek(iso: IsoDate): number {
+  const d = fromIsoDate(iso);
+  const thursday = new Date(d);
+  thursday.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
+  const firstThursday = new Date(thursday.getFullYear(), 0, 4);
+  firstThursday.setDate(
+    firstThursday.getDate() + 3 - ((firstThursday.getDay() + 6) % 7),
+  );
+  return 1 + Math.round((thursday.getTime() - firstThursday.getTime()) / (7 * 86_400_000));
+}
+
 export function monthKey(iso: IsoDate): string {
   return iso.slice(0, 7);
 }
 
-/** "Oktober 2026" */
 export function monthLabel(key: string): string {
-  const [year, month] = key.split('-');
-  return `${MONTH_NAMES[Number(month) - 1]} ${year}`;
+  const [y, m] = key.split('-').map(Number);
+  return `${MONTHS[m - 1]} ${y}`;
 }
 
-/** Monatsschlüssel um `n` Monate verschoben. */
-export function shiftMonth(key: string, n: number): string {
-  const [year, month] = key.split('-').map(Number);
-  const d = new Date(Date.UTC(year, month - 1 + n, 1));
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+export function shiftMonth(key: string, delta: number): string {
+  const [y, m] = key.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}`;
 }
 
 export function firstOfMonth(key: string): IsoDate {
@@ -121,18 +143,45 @@ export function firstOfMonth(key: string): IsoDate {
 }
 
 export function lastOfMonth(key: string): IsoDate {
-  const [year, month] = key.split('-').map(Number);
-  const d = new Date(Date.UTC(year, month, 0));
-  return toIsoDate(d);
+  const [y, m] = key.split('-').map(Number);
+  return toIsoDate(new Date(y, m, 0));
 }
 
-/**
- * Die Tage eines Monatsrasters, aufgefüllt bis zur vollen Woche.
- *
- * Beginnt am Montag vor dem Monatsersten und endet am Sonntag nach dem
- * Monatsletzten — sonst hätte das Raster ausgefranste Ränder und die
- * Wochentagsspalten stimmten nicht mehr.
- */
+/** Volle Wochen, die den Monat abdecken — für ein Montag-bis-Sonntag-Raster. */
 export function monthGridDays(key: string): IsoDate[] {
   return dateRange(startOfWeek(firstOfMonth(key)), endOfWeek(lastOfMonth(key)));
+}
+
+/** Minuten als "1:24 h" oder "45 min". */
+export function formatDuration(minutes: number): string {
+  const m = Math.round(minutes);
+  if (m < 60) return `${m} min`;
+  return `${Math.floor(m / 60)}:${`${m % 60}`.padStart(2, '0')} h`;
+}
+
+/** Sekunden als "25:14" oder "1:05:22". */
+export function formatClock(seconds: number): string {
+  const s = Math.round(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const rest = s % 60;
+  const mm = `${m}`.padStart(h > 0 ? 2 : 1, '0');
+  return h > 0
+    ? `${h}:${mm}:${`${rest}`.padStart(2, '0')}`
+    : `${mm}:${`${rest}`.padStart(2, '0')}`;
+}
+
+/** Sekunden pro Kilometer als "6:20 /km". */
+export function formatPace(secPerKm: number): string {
+  return `${formatClock(secPerKm)} /km`;
+}
+
+/** Deutsche Dezimalschreibweise, ohne unnötige Nachkommastellen. */
+export function num(value: number, digits = 1): string {
+  const rounded = Math.round(value * 10 ** digits) / 10 ** digits;
+  return rounded.toString().replace('.', ',');
+}
+
+export function mod(n: number, m: number): number {
+  return ((n % m) + m) % m;
 }

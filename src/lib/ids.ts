@@ -1,10 +1,11 @@
-/** Kurze, eindeutige Ids. crypto.randomUUID gibt es in allen Ziel-Browsern. */
+/** Ids und Zeitstempel. Bewusst winzig — aber an einer Stelle. */
+
 export function newId(prefix: string): string {
-  const raw =
+  const random =
     typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : Math.random().toString(36).slice(2) + Date.now().toString(36);
-  return `${prefix}_${raw.replace(/-/g, '').slice(0, 16)}`;
+      ? crypto.randomUUID().slice(0, 8)
+      : Math.random().toString(36).slice(2, 10);
+  return `${prefix}_${Date.now().toString(36)}${random}`;
 }
 
 export function now(): string {

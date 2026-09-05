@@ -1,56 +1,30 @@
 /**
- * Die Erholung wird **geschätzt**, nicht eingetragen.
+ * Erholung: READY, MODERATE oder RECOVERY.
  *
- * Früher gab es drei Knöpfe: niedrig, mittel, hoch. Das war eine zweite
- * Wahrheit neben den Messwerten — stand auf der Uhr 28 % und im Knopf "mittel",
- * wusste niemand, welche gilt. Und wer morgens um sechs nach einer Nachtschicht
- * eine Selbsteinschätzung abgeben soll, drückt "mittel", weil das die Mitte ist.
+ * Die App stellt keine Diagnosen. Sie fasst zusammen, was eingetragen wurde, und
+ * benennt, worauf sie sich stützt — mehr behauptet sie nicht.
  *
- * Jetzt leitet die App die Stufe aus dem ab, was da ist:
+ * Zwei Grundsätze:
  *
- *   1. **Recovery in Prozent** — liegt sie vor, ist sie die Antwort. WHOOP
- *      verrechnet dafür bereits HRV, Ruhepuls, Schlaf und Atemfrequenz. Diesen
- *      Wert mit unseren schwächeren Signalen zu überstimmen, wäre schlechter.
- *   2. **Sonst ein Punktestand** aus Schlafdauer, Schlafschuld, HRV und
- *      Ruhepuls — jeweils gegen die eigene Basislinie der letzten Wochen, nicht
- *      gegen einen Lehrbuchwert.
- *   3. **Sonst der Zusammenhang**: heute und rückwärts gilt der Normalfall,
- *      für künftige Tage wird von guter Erholung ausgegangen, damit der Plan
- *      die harten Einheiten überhaupt irgendwo hinlegen kann.
- *
- * Was hier bewusst **nicht** einfließt: die Trainingslast der letzten Tage.
- * Harte Tage in Folge und das Wochenkontingent sind bereits Regeln in
- * `rules.ts`. Sie zusätzlich in die Erholung zu rechnen hieße, dieselbe
- * Belastung zweimal abzuziehen — der Plan würde nach jeder harten Woche
- * einbrechen, ohne dass ein Messwert das hergäbe.
+ *   1. **Eine gemessene Recovery-Prozentzahl gewinnt.** WHOOP verrechnet dafür
+ *      bereits HRV, Ruhepuls, Schlaf und Atemfrequenz. Sie mit unseren
+ *      schwächeren Einzelsignalen zu überstimmen wäre schlechter, nicht besser.
+ *   2. **Sonst wird gegen die eigene Basislinie gerechnet**, nicht gegen einen
+ *      Lehrbuchwert. Eine HRV von 45 ms ist für den einen hervorragend und für
+ *      den anderen ein Alarmsignal.
  */
 
 import { daysBetween } from './dates';
-import {
-  DEFAULT_RECOVERY,
-  DEFAULT_SLEEP_DEBT,
-  recoveryFromPct,
-  sleepDebtFromHours,
-  type DayReadiness,
-  type IsoDate,
-  type Recovery,
-  type SleepDebt,
-} from './types';
+import type { DailyCheckIn, IsoDate, Recovery } from './types';
 
-/** Woher die Stufe kommt — entscheidet, wie die App darüber spricht. */
-export type RecoveryBasis =
-  /** Aus der Recovery-Prozentzahl. */
-  | 'measured'
-  /** Aus Schlaf, HRV und Ruhepuls geschätzt. */
-  | 'derived'
-  /** Nichts gemessen — aus dem Zusammenhang angenommen. */
-  | 'assumed';
+/** Woher die Einstufung kommt. Entscheidet, wie die App darüber spricht. */
+export type RecoveryBasis = 'measured' | 'derived' | 'assumed';
 
 export interface RecoveryEstimate {
-  recovery: Recovery;
-  sleepDebt: SleepDebt;
+  status: Recovery;
   basis: RecoveryBasis;
-  /** Ein Satz, wie die Stufe zustande kam. */
+  /** 0–100, für Anzeige und Score. Aus der Messung oder aus dem Punktestand. */
+  percent: number;
   headline: string;
   /** Die einzelnen Signale, jedes in einem Halbsatz. */
   reasons: string[];
@@ -60,151 +34,145 @@ export interface RecoveryEstimate {
 /* Basislinie                                                          */
 /* ------------------------------------------------------------------ */
 
-/**
- * Der eigene Normalwert für HRV und Ruhepuls.
- *
- * Absolute Zahlen sagen nichts: Eine HRV von 45 ms ist für den einen
- * hervorragend und für den anderen ein Alarmsignal. Verglichen wird deshalb
- * gegen den eigenen Schnitt der letzten Wochen.
- */
 export interface Baseline {
   hrvMs: number | null;
   restingHr: number | null;
-  /** Auf wie vielen Tagen die Basislinie beruht. */
+  sleepHours: number | null;
   days: number;
 }
 
-/** Wie weit zurück Werte für die Basislinie zählen. */
-const BASELINE_WINDOW_DAYS = 21;
-/** Weniger als so viele Werte sind kein Schnitt, sondern Zufall. */
-const BASELINE_MIN_DAYS = 4;
+const WINDOW_DAYS = 21;
+/** Unter vier Werten ist ein Schnitt kein Schnitt, sondern Zufall. */
+const MIN_DAYS = 4;
 
-export function buildBaseline(rows: DayReadiness[], before: IsoDate): Baseline {
-  const window = rows.filter(
-    (r) => r.date < before && daysBetween(r.date, before) <= BASELINE_WINDOW_DAYS,
+export function buildBaseline(entries: DailyCheckIn[], before: IsoDate): Baseline {
+  const window = entries.filter(
+    (e) => e.date < before && daysBetween(e.date, before) <= WINDOW_DAYS,
   );
-
   const mean = (values: number[]) =>
-    values.length >= BASELINE_MIN_DAYS
-      ? values.reduce((a, b) => a + b, 0) / values.length
-      : null;
+    values.length >= MIN_DAYS ? values.reduce((a, b) => a + b, 0) / values.length : null;
 
-  const hrv = window.map((r) => r.hrvMs).filter((v): v is number => v !== null && v > 0);
-  const rhr = window.map((r) => r.restingHr).filter((v): v is number => v !== null && v > 0);
+  const hrv = window.map((e) => e.hrvMs).filter((v): v is number => !!v && v > 0);
+  const rhr = window.map((e) => e.restingHr).filter((v): v is number => !!v && v > 0);
+  const sleep = window.map((e) => e.sleepHours).filter((v): v is number => !!v && v > 0);
 
   return {
     hrvMs: mean(hrv),
     restingHr: mean(rhr),
-    days: Math.max(hrv.length, rhr.length),
+    sleepHours: mean(sleep),
+    days: Math.max(hrv.length, rhr.length, sleep.length),
   };
 }
 
 /* ------------------------------------------------------------------ */
-/* Schlafschuld                                                        */
+/* Einstufung                                                          */
 /* ------------------------------------------------------------------ */
 
-/** Stundenziel, gegen das die Schlafschuld gerechnet wird. */
-const SLEEP_TARGET_H = 7.5;
-/** So viele Nächte zurück werden für die Schuld betrachtet. */
-const DEBT_WINDOW_NIGHTS = 4;
-
-/**
- * Die Schlafschuld eines Tages.
- *
- * Steht sie in den Daten (WHOOP weist sie aus), gilt sie. Sonst wird sie aus
- * den letzten vier Nächten gegen 7,5 Stunden gerechnet — dem Wert, bei dem die
- * meisten Schichtarbeiter gerade so über die Runden kommen. Unter zwei bekannten
- * Nächten wird nichts behauptet.
- */
-export function sleepDebtFor(
-  date: IsoDate,
-  row: DayReadiness | undefined,
-  rows: DayReadiness[],
-): SleepDebt {
-  if (row?.sleepDebtHours !== null && row?.sleepDebtHours !== undefined) {
-    return sleepDebtFromHours(row.sleepDebtHours);
-  }
-
-  const nights = rows
-    .filter(
-      (r) =>
-        r.sleepHours !== null &&
-        r.date <= date &&
-        daysBetween(r.date, date) < DEBT_WINDOW_NIGHTS,
-    )
-    .map((r) => r.sleepHours as number);
-
-  if (nights.length < 2) return DEFAULT_SLEEP_DEBT;
-  const deficit = nights.reduce((sum, h) => sum + Math.max(0, SLEEP_TARGET_H - h), 0);
-  return sleepDebtFromHours(deficit);
-}
-
-/* ------------------------------------------------------------------ */
-/* Schätzung                                                           */
-/* ------------------------------------------------------------------ */
-
-/** Ab diesem Punktestand gilt die Erholung als hoch bzw. niedrig. */
-const HIGH_AT = 2;
+const READY_AT = 2;
 const LOW_AT = -2;
 
-export interface RecoveryInput {
-  date: IsoDate;
-  row: DayReadiness | undefined;
-  baseline: Baseline;
-  sleepDebt: SleepDebt;
-  /** Lag am Vortag eine Nachtschicht? Kostet Erholung, ohne dass etwas gemessen sein muss. */
-  afterNightShift: boolean;
-  todayIso: IsoDate;
+/** WHOOPs eigene Farbgrenzen — damit in der App nichts anderes steht als auf der Uhr. */
+export function statusFromPercent(pct: number): Recovery {
+  if (pct <= 33) return 'low';
+  if (pct <= 66) return 'moderate';
+  return 'ready';
 }
 
-export function estimateRecovery(input: RecoveryInput): RecoveryEstimate {
-  const { row, baseline, sleepDebt, afterNightShift, date, todayIso } = input;
+function percentFromScore(score: number): number {
+  // −5 … +5 auf 15 … 95 abbilden. Nie 0 und nie 100: Der Punktestand ist eine
+  // Schätzung, und eine Schätzung, die 100 % behauptet, überschätzt sich.
+  const clamped = Math.max(-5, Math.min(5, score));
+  return Math.round(55 + clamped * 8);
+}
 
-  // 1. Die gemessene Prozentzahl schlägt alles.
-  if (row?.recoveryPct !== null && row?.recoveryPct !== undefined) {
-    const recovery = recoveryFromPct(row.recoveryPct);
+export function estimateRecovery(
+  entry: DailyCheckIn | undefined,
+  baseline: Baseline,
+  options: { afterNightShift?: boolean } = {},
+): RecoveryEstimate {
+  const afterNight = options.afterNightShift ?? false;
+
+  // 1 — Die gemessene Prozentzahl schlägt alles.
+  if (entry?.whoopRecovery !== null && entry?.whoopRecovery !== undefined) {
+    const pct = entry.whoopRecovery;
+    const status = statusFromPercent(pct);
+    const reasons: string[] = [];
+    if (entry.sleepHours) reasons.push(`${fmt(entry.sleepHours)} h Schlaf.`);
+    if (entry.soreness && entry.soreness >= 4) reasons.push('Deutlicher Muskelkater.');
+    if (entry.stress && entry.stress >= 4) reasons.push('Hohe Belastung außerhalb des Trainings.');
     return {
-      recovery,
-      sleepDebt,
+      status,
       basis: 'measured',
-      headline: `${row.recoveryPct} % Recovery — das ist ${SHORT[recovery]}.`,
-      reasons: sleepNote(row, sleepDebt),
+      percent: pct,
+      headline: `${pct} % Recovery — ${LABEL[status]}.`,
+      reasons,
     };
   }
 
-  // 2. Punktestand aus den übrigen Messwerten.
+  // 2 — Punktestand aus dem, was da ist.
   let score = 0;
   const reasons: string[] = [];
   let measured = false;
 
-  if (row?.sleepHours !== null && row?.sleepHours !== undefined) {
+  if (entry?.sleepHours) {
     measured = true;
-    const h = row.sleepHours;
+    const h = entry.sleepHours;
     if (h < 5) {
       score -= 2;
       reasons.push(`${fmt(h)} h Schlaf — zu wenig für einen Reiz.`);
-    } else if (h < 6) {
+    } else if (h < 6.5) {
       score -= 1;
       reasons.push(`${fmt(h)} h Schlaf — knapp.`);
     } else if (h >= 7.5) {
       score += 1;
       reasons.push(`${fmt(h)} h Schlaf — ausreichend.`);
     } else {
-      reasons.push(`${fmt(h)} h Schlaf — durchschnittlich.`);
+      reasons.push(`${fmt(h)} h Schlaf.`);
     }
   }
 
-  if (sleepDebt === 'high') {
-    score -= 2;
-    reasons.push('Große Schlafschuld aus den letzten Nächten.');
-  } else if (sleepDebt === 'some') {
-    score -= 1;
-    reasons.push('Etwas Schlafschuld aus den letzten Nächten.');
+  if (entry?.sleepQuality) {
+    measured = true;
+    if (entry.sleepQuality <= 2) {
+      score -= 1;
+      reasons.push('Schlafqualität schlecht.');
+    } else if (entry.sleepQuality >= 4) {
+      score += 1;
+    }
   }
 
-  if (row?.hrvMs && baseline.hrvMs) {
+  if (entry?.soreness) {
     measured = true;
-    const change = (row.hrvMs - baseline.hrvMs) / baseline.hrvMs;
+    if (entry.soreness >= 4) {
+      score -= 2;
+      reasons.push('Starker Muskelkater.');
+    } else if (entry.soreness === 3) {
+      score -= 1;
+      reasons.push('Spürbarer Muskelkater.');
+    }
+  }
+
+  if (entry?.stress) {
+    measured = true;
+    if (entry.stress >= 4) {
+      score -= 1;
+      reasons.push('Hoher Stress außerhalb des Trainings.');
+    }
+  }
+
+  if (entry?.motivation) {
+    measured = true;
+    if (entry.motivation <= 2) {
+      score -= 1;
+      reasons.push('Wenig Energie.');
+    } else if (entry.motivation >= 4) {
+      score += 1;
+    }
+  }
+
+  if (entry?.hrvMs && baseline.hrvMs) {
+    measured = true;
+    const change = (entry.hrvMs - baseline.hrvMs) / baseline.hrvMs;
     if (change <= -0.12) {
       score -= 2;
       reasons.push(`HRV ${pct(change)} unter deinem Schnitt — deutlich.`);
@@ -214,70 +182,64 @@ export function estimateRecovery(input: RecoveryInput): RecoveryEstimate {
     } else if (change >= 0.08) {
       score += 1;
       reasons.push(`HRV ${pct(change)} über deinem Schnitt.`);
-    } else {
-      reasons.push('HRV auf deinem Schnitt.');
     }
   }
 
-  if (row?.restingHr && baseline.restingHr) {
+  if (entry?.restingHr && baseline.restingHr) {
     measured = true;
-    const diff = row.restingHr - baseline.restingHr;
+    const diff = entry.restingHr - baseline.restingHr;
     if (diff >= 5) {
       score -= 2;
-      reasons.push(`Ruhepuls ${Math.round(diff)} Schläge über deinem Schnitt — deutlich.`);
+      reasons.push(`Ruhepuls ${Math.round(diff)} Schläge über deinem Schnitt.`);
     } else if (diff >= 3) {
       score -= 1;
       reasons.push(`Ruhepuls ${Math.round(diff)} Schläge über deinem Schnitt.`);
     } else if (diff <= -3) {
       score += 1;
-      reasons.push(`Ruhepuls ${Math.abs(Math.round(diff))} Schläge unter deinem Schnitt.`);
     }
   }
 
-  if (afterNightShift) {
+  if (afterNight) {
     score -= 1;
     reasons.push('Tag nach der Nachtschicht — der Körper holt noch Schlaf nach.');
   }
 
-  if (measured || sleepDebt !== 'none') {
-    const recovery: Recovery = score >= HIGH_AT ? 'high' : score <= LOW_AT ? 'low' : 'mid';
+  if (measured) {
+    const status: Recovery = score >= READY_AT ? 'ready' : score <= LOW_AT ? 'low' : 'moderate';
     return {
-      recovery,
-      sleepDebt,
+      status,
       basis: 'derived',
-      headline: `Aus deinen Werten geschätzt: ${SHORT[recovery]}.`,
+      percent: percentFromScore(score),
+      headline: `Aus deinem Check-in geschätzt: ${LABEL[status]}.`,
       reasons,
     };
   }
 
-  // 3. Nichts gemessen.
+  // 3 — Nichts eingetragen.
   //
-  // Heute und rückwärts gilt der Normalfall: Wie es einem geht, weiß man am
-  // selben Tag, und wer nichts einträgt, bekommt keine harte Einheit geschenkt.
-  // Für künftige Tage wird von guter Erholung ausgegangen — nicht als Aussage
-  // über den Körper, sondern über den Plan: Er muss die harten Einheiten
-  // irgendwo hinlegen, sonst gibt es nie welche. Kommen später Zahlen dazu,
-  // gibt er von selbst nach.
-  // Ein Tag nach der Nachtschicht ist kein erholter Tag, auch wenn nichts
-  // gemessen wurde. Ihn trotzdem als "hoch" anzunehmen und den Grund darunter
-  // zu nennen, ohne dass er wirkt, wäre ein Widerspruch auf einem Bildschirm.
-  const future = date > todayIso && !afterNightShift;
+  // Ohne Angaben gilt der Normalfall, nicht der beste Fall: Wer nichts
+  // einträgt, bekommt keine harte Einheit geschenkt.
+  //
+  // Die Nachtschicht zieht hier bewusst **nicht** zusätzlich ab. Sie steckt
+  // bereits in der Schichtregel — der Schlaftag lässt ohnehin höchstens
+  // Mittleres zu. Beides zu rechnen machte aus jedem Schlaftag ohne Check-in
+  // einen Ruhetag, und damit aus einem Regenerationstag einen Nichttag.
   return {
-    recovery: future ? 'high' : DEFAULT_RECOVERY,
-    sleepDebt,
+    status: 'moderate',
     basis: 'assumed',
-    headline: afterNightShift
-      ? 'Noch keine Werte — nach einer Nachtschicht wird nicht von Erholung ausgegangen.'
-      : date > todayIso
-        ? 'Noch keine Werte — geplant, als wärst du erholt.'
-        : 'Keine Werte für heute — gerechnet wird mit dem Normalfall.',
-    reasons: afterNightShift
-      ? ['Tag nach der Nachtschicht — der Körper holt noch Schlaf nach.']
-      : [],
+    percent: 55,
+    headline: afterNight
+      ? 'Kein Check-in — nach der Nachtschicht wird ohnehin nichts Hartes geplant.'
+      : 'Kein Check-in — gerechnet wird mit dem Normalfall.',
+    reasons: afterNight ? ['Tag nach der Nachtschicht.'] : [],
   };
 }
 
-const SHORT: Record<Recovery, string> = { low: 'niedrig', mid: 'mittel', high: 'hoch' };
+const LABEL: Record<Recovery, string> = {
+  ready: 'ready',
+  moderate: 'moderat',
+  low: 'Regeneration',
+};
 
 function fmt(n: number): string {
   return n.toString().replace('.', ',');
@@ -287,80 +249,17 @@ function pct(change: number): string {
   return `${Math.abs(Math.round(change * 100))} %`;
 }
 
-function sleepNote(row: DayReadiness, debt: SleepDebt): string[] {
-  const out: string[] = [];
-  if (row.sleepHours !== null) out.push(`${fmt(row.sleepHours)} h Schlaf.`);
-  if (debt === 'high') out.push('Große Schlafschuld — die Regeln schließen Hartes ohnehin aus.');
-  else if (debt === 'some') out.push('Etwas Schlafschuld.');
-  return out;
-}
-
-/* ------------------------------------------------------------------ */
-/* Für ganze Zeiträume                                                 */
-/* ------------------------------------------------------------------ */
-
-/**
- * Die Schätzung für jeden Tag eines Zeitraums.
- *
- * Der Generator braucht das für jeden geplanten Tag, und die Basislinie hängt
- * an den Tagen davor — beides einmal vorzurechnen ist billiger und vor allem
- * gleich, als es an zwei Stellen leicht verschieden zu tun.
- */
-export function recoveryTimeline(
-  rows: DayReadiness[],
-  dates: IsoDate[],
-  todayIso: IsoDate,
-  afterNightShift: (date: IsoDate) => boolean,
-): Map<IsoDate, RecoveryEstimate> {
-  const sorted = [...rows].sort((a, b) => a.date.localeCompare(b.date));
-  const byDate = new Map(sorted.map((r) => [r.date, r]));
-  const out = new Map<IsoDate, RecoveryEstimate>();
-
-  for (const date of dates) {
-    const row = byDate.get(date);
-    out.set(
-      date,
-      estimateRecovery({
-        date,
-        row,
-        baseline: buildBaseline(sorted, date),
-        sleepDebt: sleepDebtFor(date, row, sorted),
-        afterNightShift: afterNightShift(date),
-        todayIso,
-      }),
-    );
-  }
-  return out;
-}
-
-/** Die Schätzung für einen einzelnen Tag. Für Anzeigen, die nur einen brauchen. */
-export function recoveryFor(
-  date: IsoDate,
-  rows: DayReadiness[],
-  todayIso: IsoDate,
-  afterNightShift: boolean,
-): RecoveryEstimate {
-  const sorted = [...rows].sort((a, b) => a.date.localeCompare(b.date));
-  const row = sorted.find((r) => r.date === date);
-  return estimateRecovery({
-    date,
-    row,
-    baseline: buildBaseline(sorted, date),
-    sleepDebt: sleepDebtFor(date, row, sorted),
-    afterNightShift,
-    todayIso,
-  });
-}
-
-/** Ob für einen Tag überhaupt eine Zahl vorliegt. */
-export function hasMeasurement(row: DayReadiness | undefined): boolean {
-  if (!row) return false;
+/** Ob für einen Tag überhaupt etwas eingetragen wurde. */
+export function hasInput(entry: DailyCheckIn | undefined): boolean {
+  if (!entry) return false;
   return (
-    row.recoveryPct !== null ||
-    row.sleepHours !== null ||
-    row.sleepDebtHours !== null ||
-    row.hrvMs !== null ||
-    row.restingHr !== null ||
-    row.strain !== null
+    entry.sleepHours !== null ||
+    entry.sleepQuality !== null ||
+    entry.soreness !== null ||
+    entry.stress !== null ||
+    entry.motivation !== null ||
+    entry.whoopRecovery !== null ||
+    entry.restingHr !== null ||
+    entry.hrvMs !== null
   );
 }

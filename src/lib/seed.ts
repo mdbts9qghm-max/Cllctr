@@ -1,401 +1,511 @@
 /**
- * Erstbefüllung. Läuft genau einmal, wenn die Datenbank noch leer ist.
+ * Erstbefüllung.
  *
- * Die Schichtarten bilden den beschriebenen 12-Stunden-Rhythmus ab. Die
- * Rotation ist bewusst nur ein Platzhalter — sie muss unter Setup auf den
- * echten Rhythmus gesetzt werden, sonst plant die App am Leben vorbei.
+ * Läuft bei jedem Start, legt aber nur an, was fehlt. Die Werte stammen aus dem
+ * Profil des Nutzers — die App startet nicht leer, sondern mit dem, was schon
+ * bekannt ist. Alles davon ist unter Profil änderbar.
  */
 
 import { db } from './db';
+import { addDays, startOfWeek, today } from './dates';
 import { newId, now } from './ids';
-import { startOfWeek, today } from './dates';
 import {
   SCHEMA_VERSION,
   type Exercise,
+  type Goal,
+  type Habit,
+  type Profile,
   type Settings,
-  type ShiftPattern,
   type ShiftType,
-  type Task,
-  type TaskEnergy,
+  type TrainingPhase,
 } from './types';
 
+/* ------------------------------------------------------------------ */
+/* Herzfrequenzzonen                                                   */
+/* ------------------------------------------------------------------ */
+
 /**
- * Abwesenheiten — keine Schichten, aber sie belegen einen Tag genauso.
+ * Zonen nach Herzfrequenzreserve (Karvonen), nicht nach Prozent der Maximal-HF.
  *
- * Sie stehen bewusst neben den Schichtarten statt in einem eigenen Konzept:
- * Für die Planung ist die einzige Frage, was an einem Tag geht. Urlaub ist ein
- * voller Tag, Krankheit ist keiner. Alles andere — Rotation überschreiben,
- * Zeitraum setzen, Konflikte erkennen — funktioniert damit unverändert.
+ * Der Unterschied ist bei niedrigem Ruhepuls erheblich: 70 % der Maximal-HF sind
+ * für einen trainierten Läufer noch Spazierentempo, 70 % der Reserve treffen die
+ * Grundlage. Die Zonen lassen sich einzeln überschreiben — hier steht nur der
+ * Startwert.
  */
-export const ABSENCE_SHIFT_TYPES: ShiftType[] = [
-  {
-    id: 'urlaub',
-    name: 'Urlaub',
-    short: 'U',
-    startTime: null,
-    endTime: null,
-    crossesMidnight: false,
-    capacity: 'full',
-    kind: 'free',
-    trainingWindow: 'ganzer Tag',
-    color: '#14b8a6',
-    note: 'Ganzer Tag frei. Zählt wie eine Freischicht — mehr freie Tage heißen aber nicht mehr Training, sondern nur, dass sich dieselben Einheiten sauberer verteilen. Der Weg pausiert an diesen Tagen: die Serie reißt nicht.',
-    cancelsPlanned: false,
-    pausesRoutines: true,
-    isBuiltIn: true,
-    sortOrder: 6,
-  },
-  {
-    id: 'krank',
-    name: 'Krank',
-    short: 'K',
-    startTime: null,
-    endTime: null,
-    crossesMidnight: false,
-    capacity: 'none',
-    kind: 'off',
-    trainingWindow: null,
-    color: '#a1a1aa',
-    note: 'Kein Training. Geplante Einheiten an diesen Tagen entfallen ersatzlos, statt auf den nächsten Tag zu rutschen — nachholen wäre hier genau die falsche Reaktion. Sie zählen auch nicht als verpasst.',
-    cancelsPlanned: true,
-    pausesRoutines: true,
-    isBuiltIn: true,
-    sortOrder: 7,
-  },
+const ZONE_BOUNDS: Array<[number, number]> = [
+  [0.5, 0.6],
+  [0.6, 0.7],
+  [0.7, 0.8],
+  [0.8, 0.9],
+  [0.9, 1.0],
 ];
 
+export function hrZonesFor(maxHr: number, restHr: number) {
+  const reserve = Math.max(1, maxHr - restHr);
+  const labels = ['Regeneration', 'Grundlage', 'Tempo', 'Schwelle', 'Maximal'];
+  return ZONE_BOUNDS.map(([lo, hi], i) => ({
+    zone: (i + 1) as 1 | 2 | 3 | 4 | 5,
+    label: labels[i],
+    minBpm: Math.round(restHr + reserve * lo),
+    maxBpm: Math.round(restHr + reserve * hi),
+  }));
+}
+
+/* ------------------------------------------------------------------ */
+/* Schichtarten samt Regeln                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Die fünf Schichtarten — und was sie erlauben.
+ *
+ * `maxIntensity` ist die Tabelle aus der Anforderung, hier als Daten statt als
+ * Code: Sie lässt sich unter Profil ändern, ohne dass jemand etwas neu baut.
+ * Gelesen wird sie mit dem Erholungsstatus des Tages als Schlüssel.
+ */
 export const DEFAULT_SHIFT_TYPES: ShiftType[] = [
   {
-    id: 'tag',
+    id: 'day',
     name: 'Tagschicht',
     short: 'T',
     startTime: '07:00',
     endTime: '19:00',
     crossesMidnight: false,
-    capacity: 'none',
-    kind: 'day',
+    capability: 'none',
+    // Auch bei bester Erholung kein Training: Zwölf Stunden plus Anfahrt lassen
+    // keinen Reiz zu, der die Erholung wert wäre.
+    maxIntensity: { ready: null, moderate: null, low: null },
+    sports: ['mobility', 'recovery'],
+    maxMinutes: 20,
     trainingWindow: null,
-    color: '#eab308',
-    note: '12 Stunden. Kein Training: Schlaf, Regeneration, höchstens ein Spaziergang. Dafür genug essen — der Tag kostet Energie.',
+    color: '#F59E0B',
+    note: 'Zwölf Stunden. Kein echtes Training — höchstens 20 Minuten Mobility oder Dehnen.',
     cancelsPlanned: false,
-    pausesRoutines: false,
+    pausesStreaks: false,
     isBuiltIn: true,
     sortOrder: 1,
   },
   {
-    id: 'nacht',
+    id: 'night',
     name: 'Nachtschicht',
     short: 'N',
     startTime: '19:00',
     endTime: '07:00',
     crossesMidnight: true,
-    capacity: 'moderate',
-    kind: 'night',
-    trainingWindow: '15:30–18:00, vor der Schicht',
-    color: '#6366f1',
-    note: 'Das Fenster liegt zwischen 15:30 und 18:00, danach nichts mehr. Bei hoher Erholung ist eine harte Einheit möglich, sonst mittel oder locker.',
+    capability: 'moderate',
+    // Vor der Schicht ist Zeit, aber der Schlaf 14:00–17:00 ist Pflicht. Was
+    // davor liegt, darf den Schlaf nicht kosten.
+    maxIntensity: { ready: 'hard', moderate: 'moderate', low: 'easy' },
+    sports: ['run', 'bike', 'strength', 'mobility', 'recovery'],
+    maxMinutes: 75,
+    trainingWindow: '11:00–13:30, vor dem Schlaf',
+    color: '#6366F1',
+    note: 'Schlaf 14:00–17:00, Schicht ab 19:00. Training davor, danach nichts mehr.',
     cancelsPlanned: false,
-    pausesRoutines: false,
+    pausesStreaks: false,
     isBuiltIn: true,
     sortOrder: 2,
   },
   {
-    id: 'schlaf',
+    id: 'sleep',
     name: 'Schlaftag',
     short: 'S',
     startTime: '08:00',
     endTime: '14:00',
     crossesMidnight: false,
-    capacity: 'moderate',
-    kind: 'sleep',
-    trainingWindow: '16:00–19:30',
-    color: '#0ea5e9',
-    note: 'Tag nach der Nachtschicht, Hauptschlaf 08:00–14:00. In erster Linie Regenerationstag: bei hoher Erholung mittel, sonst locker oder frei.',
+    capability: 'moderate',
+    // In erster Linie Regenerationstag. Kein automatischer Trainingstag, auch
+    // nicht bei guter Erholung — die Nacht steckt noch in den Knochen.
+    maxIntensity: { ready: 'moderate', moderate: 'easy', low: null },
+    sports: ['run', 'bike', 'swim', 'strength', 'mobility', 'recovery'],
+    maxMinutes: 75,
+    trainingWindow: '16:00–19:30, nach dem Schlaf',
+    color: '#0EA5E9',
+    note: 'Hauptschlaf 08:00–14:00. Vor allem Regeneration; nichts Hartes.',
     cancelsPlanned: false,
-    pausesRoutines: false,
+    pausesStreaks: false,
     isBuiltIn: true,
     sortOrder: 3,
   },
   {
-    id: 'frei',
+    id: 'free',
     name: 'Freischicht',
     short: 'F',
     startTime: null,
     endTime: null,
     crossesMidnight: false,
-    capacity: 'full',
-    kind: 'free',
+    capability: 'full',
+    maxIntensity: { ready: 'hard', moderate: 'moderate', low: 'easy' },
+    sports: ['run', 'bike', 'swim', 'strength', 'mobility', 'recovery', 'hike'],
+    maxMinutes: 240,
     trainingWindow: 'ganzer Tag',
-    color: '#22c55e',
-    note: 'Kompletter Tag frei. Hier liegen die harten Einheiten — aber nur, wenn die Erholung sie hergibt.',
+    color: '#22C55E',
+    note: 'Ganzer Tag frei. Hier liegen lange und harte Einheiten — und nur hier ein Doppeltag.',
     cancelsPlanned: false,
-    pausesRoutines: false,
+    pausesStreaks: false,
     isBuiltIn: true,
     sortOrder: 4,
   },
   {
-    id: 'v',
+    id: 'variable',
     name: 'V-Schicht',
     short: 'V',
     startTime: '08:00',
     endTime: '20:00',
     crossesMidnight: false,
-    capacity: 'light',
-    kind: 'variable',
-    trainingWindow: 'während der Schicht',
-    color: '#f97316',
-    note: 'Willkürlich 08:00–20:00, kann kurzfristig vor einer Tagschicht liegen. Gehört deshalb nicht in die Rotation — sie wird auf dem Schicht-Screen als Abweichung für den betroffenen Tag gesetzt. Laufen geht während der Schicht, ins Gym kommt man dabei nicht.',
+    capability: 'short',
+    maxIntensity: { ready: 'easy', moderate: 'easy', low: null },
+    sports: ['run', 'mobility', 'recovery'],
+    maxMinutes: 35,
+    trainingWindow: '06:30–07:30 oder abends',
+    color: '#F97316',
+    note: 'Zwölf Stunden mit wenig Luft. Wenn überhaupt: kurzer Lauf oder Mobility.',
     cancelsPlanned: false,
-    pausesRoutines: false,
+    pausesStreaks: false,
     isBuiltIn: true,
     sortOrder: 5,
   },
-  ...ABSENCE_SHIFT_TYPES,
+  {
+    id: 'vacation',
+    name: 'Urlaub',
+    short: 'U',
+    startTime: null,
+    endTime: null,
+    crossesMidnight: false,
+    capability: 'full',
+    maxIntensity: { ready: 'hard', moderate: 'moderate', low: 'easy' },
+    sports: ['run', 'bike', 'swim', 'strength', 'mobility', 'recovery', 'hike'],
+    maxMinutes: 300,
+    trainingWindow: 'ganzer Tag',
+    color: '#14B8A6',
+    note: 'Frei wie eine Freischicht. Mehr freie Tage heißen nicht mehr Training, sondern bessere Verteilung.',
+    cancelsPlanned: false,
+    pausesStreaks: true,
+    isBuiltIn: true,
+    sortOrder: 6,
+  },
+  {
+    id: 'sick',
+    name: 'Krank',
+    short: 'K',
+    startTime: null,
+    endTime: null,
+    crossesMidnight: false,
+    capability: 'none',
+    maxIntensity: { ready: null, moderate: null, low: null },
+    sports: [],
+    maxMinutes: 0,
+    trainingWindow: null,
+    color: '#A1A1AA',
+    note: 'Kein Training. Geplante Einheiten entfallen ersatzlos — nachholen wäre hier die falsche Reaktion.',
+    cancelsPlanned: true,
+    pausesStreaks: true,
+    isBuiltIn: true,
+    sortOrder: 7,
+  },
 ];
 
-/**
- * Die tatsächliche Rotation: Tag, Nacht, Schlaftag, frei, frei.
- *
- * Fünf Tage, nicht sieben — der Rhythmus läuft also quer zur Kalenderwoche und
- * deckt sich erst nach 35 Tagen wieder mit ihr. Deshalb hat eine Woche mal zwei
- * und mal drei volle Tage.
- *
- * Die V-Schicht steht bewusst nicht in dieser Folge: sie kommt kurzfristig und
- * wird als Abweichung für den einzelnen Tag gesetzt.
- */
-export const DEFAULT_SEQUENCE = ['tag', 'nacht', 'schlaf', 'frei', 'frei'];
+/** Ein üblicher Durchlauf, nur als Vorschlag zum Vorbelegen. */
+export const DEFAULT_SEQUENCE = ['day', 'night', 'sleep', 'free', 'free'];
 
-const DEFAULT_EXERCISES: Array<Pick<Exercise, 'name' | 'discipline' | 'metric' | 'higherIsBetter'>> = [
-  { name: 'Kniebeuge', discipline: 'strength', metric: 'weight', higherIsBetter: true },
-  { name: 'Kreuzheben', discipline: 'strength', metric: 'weight', higherIsBetter: true },
-  { name: 'Bankdrücken', discipline: 'strength', metric: 'weight', higherIsBetter: true },
-  { name: 'Schulterdrücken', discipline: 'strength', metric: 'weight', higherIsBetter: true },
-  { name: 'Klimmzüge', discipline: 'strength', metric: 'reps', higherIsBetter: true },
-  { name: '5 km', discipline: 'run', metric: 'time', higherIsBetter: false },
-  { name: '10 km', discipline: 'run', metric: 'time', higherIsBetter: false },
-  { name: 'Halbmarathon', discipline: 'run', metric: 'time', higherIsBetter: false },
-];
+/* ------------------------------------------------------------------ */
+/* Startdaten                                                          */
+/* ------------------------------------------------------------------ */
 
-/**
- * Tägliche Routinen, die ab Werk drinstehen.
- *
- * Bewusst nur Kleinigkeiten, die ohnehin jeden Tag anstehen und nichts kosten
- * außer daran zu denken — genau dafür ist die Liste da. Alles hier lässt sich
- * umbenennen oder löschen; gelöscht bleibt gelöscht.
- */
-const DEFAULT_DAILY_ROUTINES: Array<{ title: string; notes: string; energy: TaskEnergy }> = [
-  { title: 'Supplements', notes: 'Kreatin, Vitamin D, Magnesium', energy: 'light' },
-  { title: '3 Liter trinken', notes: 'An Schichttagen die Flasche mitnehmen.', energy: 'light' },
-  { title: 'Proteinziel erreichen', notes: '', energy: 'light' },
-  { title: 'Mobility 10 Minuten', notes: 'Hüfte, Brustwirbelsäule, Sprunggelenk.', energy: 'light' },
-];
+const DEFAULT_MAX_HR = 196;
+const DEFAULT_REST_HR = 50;
 
-/**
- * Schlüssel in der Meta-Tabelle, der festhält, dass die Routinen schon einmal
- * angelegt wurden. Ohne ihn kämen sie nach jedem Löschen wieder — mit ihm
- * bekommt auch eine bestehende Installation sie einmalig nachgereicht.
- */
-const ABSENCE_SHIFTS_SEEDED = 'seed.absenceShifts.v1';
-/**
- * Markiert, dass die Schichtarten ihre Art (`kind`) und die neuen
- * Trainingsfenster bekommen haben. Ohne die Art wüsste das Regelwerk nicht, ob
- * ein Tag eine V-Schicht oder ein Schlaftag ist — es fiele auf die Kapazität
- * zurück und plante gröber, als es müsste.
- */
-const SHIFT_KINDS_SEEDED = 'seed.shiftKinds.v1';
-const DAILY_ROUTINES_SEEDED = 'seed.dailyRoutines.v1';
+export function defaultProfile(): Profile {
+  const ts = now();
+  return {
+    id: 'singleton',
+    displayName: '',
+    birthYear: new Date().getFullYear() - 24,
+    heightCm: 184,
+    weightKg: 75,
+    restingHr: DEFAULT_REST_HR,
+    // 220 − Alter ist grob, aber ein ehrlicher Startwert. Wer seine echte
+    // Maximal-HF kennt, trägt sie ein und alle Zonen rechnen sich neu.
+    maxHr: DEFAULT_MAX_HR,
+    hrZones: hrZonesFor(DEFAULT_MAX_HR, DEFAULT_REST_HR),
+    zone2PaceSec: 380, // 6:20 min/km
+    best5kSec: 1500, // 25:00
+    ftpWatts: 161,
+    swimPace100Sec: 120, // 2:00 /100 m
+    pullUps: 6,
+    pushUps: 30,
+    createdAt: ts,
+    updatedAt: ts,
+  };
+}
 
 export function defaultSettings(): Settings {
   const ts = now();
   return {
     id: 'singleton',
-    displayName: '',
-    // Eigene Werte, nach Herzfrequenzreserve berechnet. Unter Setup änderbar.
-    hrZones: [
-      { zone: 1, label: 'Regeneration', minBpm: 114, maxBpm: 138 },
-      { zone: 2, label: 'Grundlage', minBpm: 139, maxBpm: 160 },
-      { zone: 3, label: 'Tempo', minBpm: 161, maxBpm: 175 },
-      { zone: 4, label: 'Schwelle', minBpm: 176, maxBpm: 190 },
-      { zone: 5, label: 'Maximal', minBpm: 191, maxBpm: 205 },
-    ],
-    maxHr: 205,
-    restHr: 49,
-    weeklyTargets: { strength: 2, run: 2, optional: 2, maxHardPerWeek: 3, strengthHard: 1 },
-    planningProfile: 'runFirst',
-    // Aus: Die V-Schicht ist die einzige Schichtart mit lockerer Kapazität, und
-    // dort geht Laufen während der Schicht — aber kein Gym.
-    allowStrengthOnLightDays: false,
-    allowDoubleDayPerCycle: true,
-    // Leer: Der Anker wird beim ersten Plan auf die dann laufende Woche gesetzt.
-    // Leer: wird beim ersten Plan auf den Starttag gesetzt.
+    theme: 'system',
     planStartDate: null,
-    mesoLoadCycles: 4,
-    mesoDeloadCycles: 1,
-    // Leer: keine Korrektur, der erste Plan fängt bei null an.
-    progressionAdjust: {},
-    autoUpdatePlan: true,
-    // Zwei harte Tage in Folge sind erlaubt, drei nie.
+    /**
+     * 8 Stunden statt der genannten 10–12.
+     *
+     * 10–12 h sind das Dach, nicht der Alltag: In einer Woche mit drei
+     * Tagschichten sind sie nicht erreichbar. Ein Ziel, das man systematisch
+     * verfehlt, taugt nicht als Maßstab — es macht jede Auswertung rot und
+     * damit wertlos. Der Wert ist einstellbar und je Phase überschreibbar.
+     */
+    weeklyMinutesTarget: 480,
+    weeklyDaysTarget: 5,
+    /**
+     * Verteilung für einen Hybrid-Athleten mit Ultra-Ziel: Laufen trägt die
+     * Hauptlast, Rad liefert Umfang ohne Aufprall, Kraft hält die Struktur
+     * zusammen, Mobility ist die Versicherung.
+     */
+    sportMix: { run: 45, bike: 20, swim: 5, strength: 22, mobility: 8 },
+    maxHardPerWeek: 3,
     maxConsecutiveHardDays: 2,
-    // Mitte des brauchbaren Bereichs von 5–10 %.
-    weeklyVolumeGrowthPct: 8,
-    minHoursBetweenKeySessions: 24,
-    rescheduleWindowDays: 7,
-    confirmRescheduleProposals: true,
+    rampWarnPct: 25,
+    notificationsEnabled: true,
     schemaVersion: SCHEMA_VERSION,
     createdAt: ts,
     updatedAt: ts,
   };
 }
 
-function defaultPattern(): ShiftPattern {
+/** Startphase: Base über zwölf Wochen — die richtige Antwort auf ein Ultra-Ziel. */
+function defaultPhase(): TrainingPhase {
   const ts = now();
+  const start = startOfWeek(today());
   return {
-    id: newId('pat'),
-    name: 'Meine Rotation',
-    // Auf den Montag dieser Woche verankert, damit der Start nachvollziehbar ist.
-    anchorDate: startOfWeek(today()),
-    sequence: [...DEFAULT_SEQUENCE],
-    active: true,
+    id: newId('phase'),
+    kind: 'base',
+    name: 'Base',
+    startDate: start,
+    endDate: addDays(start, 12 * 7 - 1),
+    weeklyMinutesTarget: null,
+    focus: 'Grundlagenausdauer aufbauen, Kraftbasis halten, Technik sauber.',
+    notes:
+      'Zwölf Wochen Base sind für ein Ultra-Ziel kein Umweg, sondern die Voraussetzung. Intensität kommt später.',
     createdAt: ts,
     updatedAt: ts,
   };
 }
 
+const DEFAULT_EXERCISES: Array<Pick<Exercise, 'name' | 'muscleGroups' | 'metric' | 'higherIsBetter'>> = [
+  { name: 'Kniebeuge', muscleGroups: ['Beine', 'Rumpf'], metric: 'weight', higherIsBetter: true },
+  { name: 'Kreuzheben', muscleGroups: ['Rücken', 'Beine'], metric: 'weight', higherIsBetter: true },
+  { name: 'Bankdrücken', muscleGroups: ['Brust', 'Trizeps'], metric: 'weight', higherIsBetter: true },
+  { name: 'Schulterdrücken', muscleGroups: ['Schultern'], metric: 'weight', higherIsBetter: true },
+  { name: 'Klimmzüge', muscleGroups: ['Rücken', 'Bizeps'], metric: 'reps', higherIsBetter: true },
+  { name: 'Liegestütze', muscleGroups: ['Brust'], metric: 'reps', higherIsBetter: true },
+  { name: 'Rudern', muscleGroups: ['Rücken'], metric: 'weight', higherIsBetter: true },
+  { name: 'Ausfallschritte', muscleGroups: ['Beine'], metric: 'weight', higherIsBetter: true },
+  { name: 'Plank', muscleGroups: ['Rumpf'], metric: 'time', higherIsBetter: true },
+];
+
+const DEFAULT_HABITS: Array<Omit<Habit, 'id' | 'createdAt' | 'updatedAt'>> = [
+  {
+    name: 'Schlaf',
+    kind: 'quantity',
+    category: 'sleep',
+    unit: 'h',
+    target: 7.5,
+    minimum: 6.5,
+    schedule: { type: 'daily', weekdays: null, timesPerWeek: null },
+    restDayExempt: false,
+    active: true,
+    sortOrder: 1,
+  },
+  {
+    name: 'Wasser',
+    kind: 'quantity',
+    category: 'nutrition',
+    unit: 'l',
+    target: 3,
+    minimum: 2,
+    schedule: { type: 'daily', weekdays: null, timesPerWeek: null },
+    restDayExempt: false,
+    active: true,
+    sortOrder: 2,
+  },
+  {
+    name: 'Protein',
+    kind: 'quantity',
+    category: 'nutrition',
+    unit: 'g',
+    // 2 g pro kg bei 75 kg. Rechnet sich neu, wenn das Gewicht sich ändert.
+    target: 150,
+    minimum: 120,
+    schedule: { type: 'daily', weekdays: null, timesPerWeek: null },
+    restDayExempt: false,
+    active: true,
+    sortOrder: 3,
+  },
+  {
+    name: 'Supplements',
+    kind: 'check',
+    category: 'nutrition',
+    unit: '',
+    target: null,
+    minimum: null,
+    schedule: { type: 'daily', weekdays: null, timesPerWeek: null },
+    restDayExempt: false,
+    active: true,
+    sortOrder: 4,
+  },
+  {
+    name: 'Mobility',
+    kind: 'quantity',
+    category: 'movement',
+    unit: 'min',
+    target: 10,
+    minimum: 5,
+    schedule: { type: 'daily', weekdays: null, timesPerWeek: null },
+    restDayExempt: true,
+    active: true,
+    sortOrder: 5,
+  },
+  {
+    name: 'Schritte',
+    kind: 'quantity',
+    category: 'movement',
+    unit: '',
+    target: 8000,
+    minimum: 5000,
+    schedule: { type: 'daily', weekdays: null, timesPerWeek: null },
+    restDayExempt: true,
+    active: true,
+    sortOrder: 6,
+  },
+  {
+    name: 'Kein Social Media vor dem Schlafen',
+    kind: 'check',
+    category: 'mind',
+    unit: '',
+    target: null,
+    minimum: null,
+    schedule: { type: 'daily', weekdays: null, timesPerWeek: null },
+    restDayExempt: false,
+    active: true,
+    sortOrder: 7,
+  },
+  {
+    name: 'Lesen',
+    kind: 'quantity',
+    category: 'mind',
+    unit: 'min',
+    target: 20,
+    minimum: 10,
+    schedule: { type: 'timesPerWeek', weekdays: null, timesPerWeek: 4 },
+    restDayExempt: false,
+    active: true,
+    sortOrder: 8,
+  },
+];
+
+/** Die Ziele aus dem Profil — mit dem heutigen Stand als Ausgangswert. */
+function defaultGoals(): Goal[] {
+  const ts = now();
+  const base = { active: true, notes: '', createdAt: ts, updatedAt: ts };
+  return [
+    {
+      id: newId('goal'),
+      title: '100 km Ultra',
+      kind: 'endurance',
+      startValue: 0,
+      currentValue: 0,
+      targetValue: 100,
+      unit: 'km',
+      higherIsBetter: true,
+      // Ohne genanntes Datum bleibt es offen. Sobald eins steht, richtet sich
+      // die Periodisierung danach.
+      targetDate: null,
+      ...base,
+      notes: 'Längster Lauf bisher zählt als Fortschritt. Zieldatum eintragen, sobald es feststeht.',
+    },
+    {
+      id: newId('goal'),
+      title: '5 km unter 23 Minuten',
+      kind: 'endurance',
+      startValue: 1500,
+      currentValue: 1500,
+      targetValue: 1380,
+      unit: 's',
+      higherIsBetter: false,
+      targetDate: null,
+      ...base,
+    },
+    {
+      id: newId('goal'),
+      title: '10 Klimmzüge',
+      kind: 'strength',
+      startValue: 6,
+      currentValue: 6,
+      targetValue: 10,
+      unit: 'Wdh',
+      higherIsBetter: true,
+      targetDate: null,
+      ...base,
+    },
+    {
+      id: newId('goal'),
+      title: 'FTP 200 Watt',
+      kind: 'endurance',
+      startValue: 161,
+      currentValue: 161,
+      targetValue: 200,
+      unit: 'W',
+      higherIsBetter: true,
+      targetDate: null,
+      ...base,
+    },
+  ];
+}
+
+/* ------------------------------------------------------------------ */
+
+const SEED_MARK = 'seed.v1';
+
 /**
- * Legt Startdaten an, falls noch keine existieren. Mehrfaches Aufrufen ist
- * unschädlich — jede Tabelle wird nur befüllt, wenn sie leer ist.
+ * Legt an, was fehlt. Mehrfaches Aufrufen ist unschädlich.
+ *
+ * Die Marke in `meta` sorgt dafür, dass gelöschte Startdaten gelöscht bleiben:
+ * Wer alle Habits wegwirft, will sie beim nächsten Start nicht wiederhaben.
  */
 export async function seedIfEmpty(): Promise<void> {
   await db.transaction(
     'rw',
-    [db.settings, db.shiftTypes, db.shiftPatterns, db.exercises, db.tasks, db.meta, db.wayAreas],
+    [db.profile, db.settings, db.shiftTypes, db.phases, db.exercises, db.habits, db.goals, db.meta],
     async () => {
-    if ((await db.settings.count()) === 0) {
-      await db.settings.put(defaultSettings());
-    } else {
-      // Nachgereicht für Installationen von vor der progressiven Steigerung:
-      // ohne den Stufenstand fiele jeder neue Plan auf Stufe 0 zurück.
-      const existing = await db.settings.get('singleton');
-      if (existing && existing.autoUpdatePlan === undefined) {
-        await db.settings.update('singleton', { autoUpdatePlan: true, updatedAt: now() });
-      }
-      // Die neuen Regelgrenzen kamen mit dem Regelwerk dazu. Ohne sie stünde
-      // in `maxHardPerWeek` undefined und jede harte Einheit fiele durch die
-      // Prüfung — der Plan hätte gar keine mehr.
-      if (existing && existing.maxConsecutiveHardDays === undefined) {
-        await db.settings.update('singleton', {
-          maxConsecutiveHardDays: 2,
-          weeklyVolumeGrowthPct: 8,
-          weeklyTargets: {
-            strength: existing.weeklyTargets?.strength ?? 2,
-            run: existing.weeklyTargets?.run ?? 2,
-            optional: existing.weeklyTargets?.optional ?? 2,
-            maxHardPerWeek: existing.weeklyTargets?.maxHardPerWeek ?? 3,
-            strengthHard: existing.weeklyTargets?.strengthHard ?? 1,
-          },
-          updatedAt: now(),
-        });
-      }
-      if (existing && !existing.progressionAdjust) {
-        // Der frühere `progressionBase` war ein aufsummierter Zähler und wird
-        // bewusst nicht übernommen: die Stufe wird jetzt aus den erledigten
-        // Einheiten gezählt, ein Übertrag würde doppelt zählen.
-        await db.settings.update('singleton', { progressionAdjust: {}, updatedAt: now() });
-      }
-    }
-    if ((await db.shiftTypes.count()) === 0) {
-      await db.shiftTypes.bulkPut(DEFAULT_SHIFT_TYPES);
-      await db.meta.put({ key: ABSENCE_SHIFTS_SEEDED, value: true, updatedAt: now() });
-    } else if (!(await db.meta.get(ABSENCE_SHIFTS_SEEDED))) {
-      // Urlaub und Krank kamen später dazu. An eine Markierung gekoppelt statt
-      // an "Tabelle leer": so bekommt sie auch eine bestehende Installation —
-      // und wer sie löscht, bekommt sie nicht wieder aufgedrängt.
-      const existing = new Set((await db.shiftTypes.toArray()).map((t) => t.id));
-      const missing = ABSENCE_SHIFT_TYPES.filter((t) => !existing.has(t.id));
-      if (missing.length > 0) await db.shiftTypes.bulkPut(missing);
-      await db.meta.put({ key: ABSENCE_SHIFTS_SEEDED, value: true, updatedAt: now() });
-    }
+      if ((await db.profile.count()) === 0) await db.profile.put(defaultProfile());
+      if ((await db.settings.count()) === 0) await db.settings.put(defaultSettings());
+      if ((await db.shiftTypes.count()) === 0) await db.shiftTypes.bulkPut(DEFAULT_SHIFT_TYPES);
+      if ((await db.phases.count()) === 0) await db.phases.put(defaultPhase());
 
-    // Art und Trainingsfenster kamen mit dem neuen Regelwerk dazu. Nachgereicht
-    // für die Standardarten; eigene Schichtarten bekommen die Art aus ihrer
-    // Kapazität und lassen sich unter Setup korrigieren.
-    if (!(await db.meta.get(SHIFT_KINDS_SEEDED))) {
-      const byId = new Map(DEFAULT_SHIFT_TYPES.map((t) => [t.id, t]));
-      const patched = (await db.shiftTypes.toArray())
-        .filter((t) => t.kind === undefined)
-        .map((t) => {
-          const std = byId.get(t.id);
-          if (std) {
-            // Name, Farbe und eigene Notizen bleiben — geändert wird nur, was
-            // die Regeln brauchen.
-            return { ...t, kind: std.kind, trainingWindow: std.trainingWindow };
-          }
-          const kind =
-            t.capacity === 'none' ? 'off' : t.capacity === 'full' ? 'free' : t.capacity === 'light' ? 'variable' : 'sleep';
-          return { ...t, kind: kind as ShiftType['kind'] };
-        });
-      if (patched.length > 0) await db.shiftTypes.bulkPut(patched);
-      await db.meta.put({ key: SHIFT_KINDS_SEEDED, value: true, updatedAt: now() });
-    }
+      if (await db.meta.get(SEED_MARK)) return;
 
-    // Die Marke, ob eine Schichtart den Weg pausiert, kam später dazu. Ohne sie
-    // würde jeder Urlaubstag als Lücke in der Serie zählen.
-    const withoutFlag = (await db.shiftTypes.toArray()).filter(
-      (t) => t.pausesRoutines === undefined,
-    );
-    if (withoutFlag.length > 0) {
-      await db.shiftTypes.bulkPut(
-        withoutFlag.map((t) => ({
-          ...t,
-          pausesRoutines: t.cancelsPlanned || t.id === 'urlaub',
-        })),
-      );
-    }
-    if ((await db.shiftPatterns.count()) === 0) {
-      await db.shiftPatterns.put(defaultPattern());
-    }
-    if ((await db.exercises.count()) === 0) {
       const ts = now();
-      await db.exercises.bulkPut(
-        DEFAULT_EXERCISES.map((e) => ({
-          id: newId('ex'),
-          ...e,
-          archived: false,
-          createdAt: ts,
-        })),
-      );
-    }
+      if ((await db.exercises.count()) === 0) {
+        await db.exercises.bulkPut(
+          DEFAULT_EXERCISES.map((e) => ({
+            id: newId('ex'),
+            ...e,
+            archived: false,
+            createdAt: ts,
+          })),
+        );
+      }
+      if ((await db.habits.count()) === 0) {
+        await db.habits.bulkPut(
+          DEFAULT_HABITS.map((h) => ({ id: newId('habit'), ...h, createdAt: ts, updatedAt: ts })),
+        );
+      }
+      if ((await db.goals.count()) === 0) await db.goals.bulkPut(defaultGoals());
 
-    // Nicht an "Tabelle leer" gekoppelt, sondern an eine eigene Markierung:
-    // So bekommt auch eine Installation, in der schon Aufgaben liegen, die
-    // Routinen einmalig nachgereicht — und ein Löschen hält.
-    if (!(await db.meta.get(DAILY_ROUTINES_SEEDED))) {
-      const ts = now();
-      const routines: Task[] = DEFAULT_DAILY_ROUTINES.map((r) => ({
-        id: newId('task'),
-        kind: 'chore',
-        title: r.title,
-        notes: r.notes,
-        dueDate: null,
-        time: null,
-        priority: 2,
-        energy: r.energy,
-        status: 'open',
-        recurrence: { kind: 'daily', interval: 1, weekdays: null, dayOfMonth: null },
-        templateTaskId: null,
-        wayArea: null,
-        wayOrder: null,
-        completedAt: null,
-        createdAt: ts,
-        updatedAt: ts,
-      }));
-      await db.tasks.bulkPut(routines);
-      await db.meta.put({ key: DAILY_ROUTINES_SEEDED, value: true, updatedAt: ts });
-    }
-  });
+      await db.meta.put({ key: SEED_MARK, value: true, updatedAt: ts });
+    },
+  );
 }
 
-/** Löscht alle lokalen Daten und legt die Startdaten neu an. */
+/** Löscht alles auf diesem Gerät und legt die Startdaten neu an. */
 export async function resetAll(): Promise<void> {
   await db.transaction('rw', db.tables, async () => {
     await Promise.all(db.tables.map((t) => t.clear()));

@@ -3,33 +3,18 @@ import './globals.css';
 import { AppShell } from '@/components/AppShell';
 
 export const metadata: Metadata = {
-  title: 'Cllctr',
-  description: 'Trainingsplanung, Alltag und Fortschritt — lokal auf deinem Gerät.',
+  title: 'Cllctr — Hybrid Athlete OS',
+  description:
+    'Training, Habits und Alltag für Hybrid-Athleten im Schichtdienst. Alle Daten bleiben auf dem Gerät.',
   manifest: '/manifest.json',
-  applicationName: 'Cllctr',
-  // Damit die App vom Homescreen ohne Safari-Leisten startet und die
-  // Statusleiste zum dunklen Hintergrund passt.
-  appleWebApp: {
-    capable: true,
-    title: 'Cllctr',
-    statusBarStyle: 'black-translucent',
-  },
-  icons: {
-    icon: '/icon-192.png',
-    apple: '/apple-touch-icon.png',
-  },
-  formatDetection: { telephone: false },
-  other: {
-    // Next setzt nur das moderne `mobile-web-app-capable`. Ältere iOS-Versionen
-    // starten ohne die apple-Variante weiterhin mit Safari-Leisten.
-    'apple-mobile-web-app-capable': 'yes',
-  },
+  appleWebApp: { capable: true, statusBarStyle: 'black-translucent', title: 'Cllctr' },
 };
 
 export const viewport: Viewport = {
-  themeColor: '#0a0a0b',
+  themeColor: '#08090c',
   width: 'device-width',
   initialScale: 1,
+  // Kein maximumScale: Zoom zu verbieten sperrt Menschen aus, die ihn brauchen.
   viewportFit: 'cover',
 };
 

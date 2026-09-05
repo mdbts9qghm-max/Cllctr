@@ -1,64 +1,111 @@
 'use client';
 
-/** Kleine, wiederverwendete Bausteine. Bewusst schlicht gehalten. */
+/**
+ * Die Bausteine der Oberfläche.
+ *
+ * Bewusst wenige und bewusst dumm: Sie kennen keine Daten und keine Logik. Wer
+ * hier ein `useLiveQuery` einbaut, bekommt eine Komponente, die man nicht mehr
+ * an einer anderen Stelle verwenden kann.
+ */
 
-import type { TrainingCapacity } from '@/lib/types';
+import type { ReactNode } from 'react';
+
+/* ------------------------------------------------------------------ */
+/* Struktur                                                            */
+/* ------------------------------------------------------------------ */
 
 export function Section({
   title,
   hint,
+  action,
   children,
 }: {
-  title: string;
+  title?: string;
   hint?: string;
-  children: React.ReactNode;
+  action?: ReactNode;
+  children: ReactNode;
 }) {
   return (
-    <section className="mb-8">
-      <h2 className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-ink-faint">
-        {title}
-      </h2>
-      {hint ? <p className="mb-3 text-sm leading-relaxed text-ink-muted">{hint}</p> : null}
-      <div className={hint ? '' : 'mt-3'}>{children}</div>
+    <section className="mb-7">
+      {title ? (
+        <div className="mb-2.5 flex items-baseline justify-between gap-3 px-0.5">
+          <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-faint">
+            {title}
+          </h2>
+          {action}
+        </div>
+      ) : null}
+      {hint ? (
+        <p className="mb-3 px-0.5 text-xs leading-relaxed text-ink-faint">{hint}</p>
+      ) : null}
+      {children}
     </section>
   );
 }
 
-export function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+export function Card({
+  children,
+  className = '',
+  tone = 'default',
+}: {
+  children: ReactNode;
+  className?: string;
+  tone?: 'default' | 'accent' | 'quiet';
+}) {
+  const tones = {
+    default: 'border-line bg-surface',
+    accent: 'border-[color:var(--color-accent-dim)] bg-surface',
+    quiet: 'border-line bg-surface-2',
+  };
   return (
-    <div className={`rounded-lg border border-line bg-surface p-4 ${className}`}>{children}</div>
+    <div className={`rounded-[14px] border ${tones[tone]} p-4 ${className}`}>{children}</div>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/* Bedienelemente                                                      */
+/* ------------------------------------------------------------------ */
 
 export function Button({
   children,
   onClick,
   variant = 'default',
-  disabled = false,
+  size = 'md',
+  disabled,
   type = 'button',
+  className = '',
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   onClick?: () => void;
-  variant?: 'default' | 'primary' | 'danger';
+  variant?: 'default' | 'primary' | 'danger' | 'ghost';
+  size?: 'sm' | 'md';
   disabled?: boolean;
   type?: 'button' | 'submit';
+  className?: string;
 }) {
-  const styles: Record<string, string> = {
-    default: 'border-line-strong bg-surface-2 text-ink hover:border-ink-faint',
-    primary: 'border-ember bg-ember text-void font-semibold hover:bg-ember/90',
-    danger: 'border-danger/50 bg-transparent text-danger hover:bg-danger/10',
+  const variants = {
+    default: 'border-line-strong bg-surface-2 text-ink hover:border-[color:var(--color-accent)]',
+    primary:
+      'border-[color:var(--color-accent)] bg-[color:var(--color-accent)] text-white hover:opacity-90',
+    danger: 'border-[color:var(--color-warn)]/50 bg-transparent text-[color:var(--color-warn)]',
+    ghost: 'border-transparent bg-transparent text-ink-muted hover:text-ink',
   };
+  const sizes = { sm: 'px-2.5 py-1 text-xs', md: 'px-3.5 py-2 text-sm' };
+
   return (
     <button
       type={type}
       onClick={onClick}
       disabled={disabled}
-      className={`rounded border px-4 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${styles[variant]}`}
+      className={`rounded-lg border font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${variants[variant]} ${sizes[size]} ${className}`}
     >
       {children}
     </button>
   );
 }
+
+export const inputClass =
+  'w-full rounded-lg border border-line-strong bg-surface-2 px-3 py-2 text-base text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-[color:var(--color-accent)]';
 
 export function Field({
   label,
@@ -67,90 +114,204 @@ export function Field({
 }: {
   label: string;
   hint?: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-sm text-ink-muted">{label}</span>
+      <span className="mb-1.5 block text-[11px] font-medium uppercase tracking-wider text-ink-faint">
+        {label}
+      </span>
       {children}
-      {hint ? <span className="mt-1 block text-xs text-ink-faint">{hint}</span> : null}
+      {hint ? <span className="mt-1 block text-[11px] text-ink-faint">{hint}</span> : null}
     </label>
   );
 }
 
-export const inputClass =
-  'w-full rounded border border-line-strong bg-surface-2 px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-ember focus:outline-none';
-
-const CAPACITY_STYLE: Record<TrainingCapacity, string> = {
-  none: 'border-line-strong text-ink-faint',
-  light: 'border-ember-dim text-ember',
-  moderate: 'border-sky-700 text-sky-400',
-  full: 'border-ok/50 text-ok',
-};
-
-export function CapacityBadge({ capacity, label }: { capacity: TrainingCapacity; label: string }) {
+/** Auswahl aus wenigen Werten — schneller als ein Dropdown auf dem Telefon. */
+export function Segmented<T extends string>({
+  options,
+  value,
+  onChange,
+  size = 'md',
+}: {
+  options: Array<{ value: T; label: string }>;
+  value: T;
+  onChange: (value: T) => void;
+  size?: 'sm' | 'md';
+}) {
   return (
-    <span
-      className={`inline-block shrink-0 whitespace-nowrap rounded border px-2 py-0.5 text-[11px] uppercase tracking-wider ${CAPACITY_STYLE[capacity]}`}
-    >
-      {label}
-    </span>
+    <div className="flex gap-1 rounded-lg border border-line bg-surface-2 p-1">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          onClick={() => onChange(o.value)}
+          aria-pressed={value === o.value}
+          className={`flex-1 rounded-md ${size === 'sm' ? 'px-2 py-1 text-xs' : 'px-3 py-1.5 text-sm'} font-medium transition-colors ${
+            value === o.value
+              ? 'bg-[color:var(--color-accent)] text-white'
+              : 'text-ink-muted hover:text-ink'
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
-/**
- * Rauten-Marke.
- *
- * Bewusst als SVG und nicht als Zeichen wie ▪ oder ◆: iOS rendert solche
- * Zeichen je nach Schrift als Emoji oder als leeren Kasten. Ein gezeichnetes
- * Element sieht überall gleich aus.
- */
-export function Mark({
-  variant = 'solid',
+/* ------------------------------------------------------------------ */
+/* Anzeige                                                             */
+/* ------------------------------------------------------------------ */
+
+export type Tone = 'good' | 'ok' | 'warn' | 'neutral' | 'accent';
+
+const TONE_TEXT: Record<Tone, string> = {
+  good: 'text-[color:var(--color-good)]',
+  ok: 'text-[color:var(--color-ok)]',
+  warn: 'text-[color:var(--color-warn)]',
+  neutral: 'text-ink',
+  accent: 'text-[color:var(--color-accent)]',
+};
+
+const TONE_BG: Record<Tone, string> = {
+  good: 'bg-[color:var(--color-good)]',
+  ok: 'bg-[color:var(--color-ok)]',
+  warn: 'bg-[color:var(--color-warn)]',
+  neutral: 'bg-[color:var(--color-ink-faint)]',
+  accent: 'bg-[color:var(--color-accent)]',
+};
+
+export function toneClass(tone: Tone): string {
+  return TONE_TEXT[tone];
+}
+
+/** Ein Punkt in Ampelfarbe. Ersetzt Emoji, die auf jedem Gerät anders aussehen. */
+export function Dot({ tone, className = '' }: { tone: Tone; className?: string }) {
+  return <span className={`inline-block size-2 shrink-0 rounded-full ${TONE_BG[tone]} ${className}`} />;
+}
+
+/** Eine große Zahl mit Beschriftung — das Grundelement jedes Dashboards. */
+export function Stat({
+  label,
+  value,
+  unit,
+  sub,
+  tone = 'neutral',
+}: {
+  label: string;
+  value: string | number;
+  unit?: string;
+  sub?: string;
+  tone?: Tone;
+}) {
+  return (
+    <div>
+      <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-ink-faint">{label}</p>
+      <p className={`mt-1 text-2xl font-semibold leading-none tabular ${TONE_TEXT[tone]}`}>
+        {value}
+        {unit ? <span className="ml-0.5 text-sm font-normal text-ink-faint">{unit}</span> : null}
+      </p>
+      {sub ? <p className="mt-1 text-[11px] leading-tight text-ink-faint">{sub}</p> : null}
+    </div>
+  );
+}
+
+export function Bar({
+  ratio,
+  tone = 'accent',
   className = '',
 }: {
-  variant?: 'solid' | 'half' | 'outline';
+  ratio: number;
+  tone?: Tone;
   className?: string;
 }) {
   return (
-    <svg
-      viewBox="0 0 10 10"
-      aria-hidden="true"
-      className={`inline-block size-2.5 shrink-0 ${className}`}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-    >
-      <path d="M5 1l4 4-4 4-4-4z" strokeLinejoin="round" />
-      {variant === 'solid' ? <path d="M5 1l4 4-4 4-4-4z" fill="currentColor" /> : null}
-      {variant === 'half' ? <path d="M5 3l2 2-2 2-2-2z" fill="currentColor" stroke="none" /> : null}
-    </svg>
+    <div className={`h-1.5 overflow-hidden rounded-full bg-surface-2 ${className}`}>
+      <div
+        className={`h-full rounded-full transition-[width] duration-500 ${TONE_BG[tone]}`}
+        style={{ width: `${Math.max(0, Math.min(100, ratio * 100))}%` }}
+      />
+    </div>
   );
 }
 
-/** Kleine Faktenkachel — Dauer, Zone, RPE. Liest sich besser als eine Zeile mit Trennpunkten. */
-export function Chip({ children }: { children: React.ReactNode }) {
+export function Chip({ children, tone = 'neutral' }: { children: ReactNode; tone?: Tone }) {
+  const border: Record<Tone, string> = {
+    good: 'border-[color:var(--color-good)]/40',
+    ok: 'border-[color:var(--color-ok)]/40',
+    warn: 'border-[color:var(--color-warn)]/40',
+    neutral: 'border-line-strong',
+    accent: 'border-[color:var(--color-accent)]/50',
+  };
   return (
-    <span className="rounded border border-line-strong px-2 py-0.5 text-[11px] text-ink-muted tabular">
+    <span
+      className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] ${border[tone]} ${TONE_TEXT[tone]}`}
+    >
       {children}
     </span>
   );
 }
 
 export function Notice({
-  tone = 'info',
   children,
+  tone = 'accent',
 }: {
-  tone?: 'info' | 'warn' | 'ok' | 'error';
-  children: React.ReactNode;
+  children: ReactNode;
+  tone?: 'accent' | 'good' | 'warn';
 }) {
-  const tones: Record<string, string> = {
-    info: 'border-line bg-surface text-ink-muted',
-    warn: 'border-ember-dim bg-ember/5 text-ink',
-    ok: 'border-ok/40 bg-ok/5 text-ink',
-    error: 'border-danger/40 bg-danger/10 text-ink',
+  const styles = {
+    accent: 'border-[color:var(--color-accent)]/40 bg-[color:var(--color-accent)]/10',
+    good: 'border-[color:var(--color-good)]/40 bg-[color:var(--color-good)]/10',
+    warn: 'border-[color:var(--color-warn)]/40 bg-[color:var(--color-warn)]/10',
   };
   return (
-    <p className={`rounded border p-3 text-sm leading-relaxed ${tones[tone]}`}>{children}</p>
+    <div className={`rounded-lg border p-3 text-sm leading-relaxed text-ink ${styles[tone]}`}>
+      {children}
+    </div>
+  );
+}
+
+export function Empty({ title, children }: { title: string; children?: ReactNode }) {
+  return (
+    <Card tone="quiet">
+      <p className="text-sm font-medium text-ink">{title}</p>
+      {children ? (
+        <div className="mt-1.5 text-sm leading-relaxed text-ink-muted">{children}</div>
+      ) : null}
+    </Card>
+  );
+}
+
+export function Loading() {
+  return <p className="p-4 text-sm text-ink-faint">Lade …</p>;
+}
+
+/** Modaler Bereich für Formulare. Auf dem Telefon von unten, sonst mittig. */
+export function Sheet({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+      <button
+        aria-label="Schließen"
+        onClick={onClose}
+        className="absolute inset-0 bg-black/60 backdrop-blur-[2px]"
+      />
+      <div className="relative max-h-[90vh] w-full overflow-y-auto rounded-t-2xl border border-line bg-surface p-4 sm:max-w-lg sm:rounded-2xl">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="text-base font-semibold text-ink">{title}</h2>
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            Schließen
+          </Button>
+        </div>
+        {children}
+      </div>
+    </div>
   );
 }

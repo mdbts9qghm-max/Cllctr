@@ -1,28 +1,30 @@
 /**
- * Export und Import als JSON-Datei.
+ * Export und Import.
  *
- * Lokale Daten sind weg, sobald der Browser-Speicher geleert wird. Das hier
- * ist die einzige Sicherung, die es gibt — deshalb schon in Phase 1 und nicht
- * am Ende.
+ * Die Daten liegen nur auf diesem Gerät. Die Exportdatei ist die einzige Kopie,
+ * die es gibt — deshalb ist sie vollständig, lesbar und versioniert. Kein
+ * Binärformat: Wer sie in fünf Jahren öffnet, soll sie auch ohne diese App noch
+ * verstehen.
  */
 
 import { db, TABLE_NAMES, type TableName } from './db';
-import { now } from './ids';
-import { SCHEMA_VERSION } from './types';
+import { today } from './dates';
+import { minutesOf, distanceOf, loadOf } from './load';
+import { SCHEMA_VERSION, SPORT_LABEL, type TrainingSession } from './types';
 
-export const BACKUP_FORMAT = 'cllctr-backup';
+const FORMAT = 'cllctr-backup';
 
 export interface BackupFile {
-  format: typeof BACKUP_FORMAT;
+  format: typeof FORMAT;
   schemaVersion: number;
   exportedAt: string;
-  /** Anzahl Datensätze pro Tabelle — erlaubt eine Vorschau vor dem Import. */
   counts: Record<string, number>;
   data: Record<string, unknown[]>;
 }
 
-/** Liest die komplette Datenbank aus und baut die Backup-Struktur. */
-export async function buildBackup(): Promise<BackupFile> {
+export class BackupError extends Error {}
+
+export async function createBackup(): Promise<BackupFile> {
   const data: Record<string, unknown[]> = {};
   const counts: Record<string, number> = {};
 
@@ -35,103 +37,149 @@ export async function buildBackup(): Promise<BackupFile> {
   });
 
   return {
-    format: BACKUP_FORMAT,
+    format: FORMAT,
     schemaVersion: SCHEMA_VERSION,
-    exportedAt: now(),
+    exportedAt: new Date().toISOString(),
     counts,
     data,
   };
 }
 
-/** Dateiname mit Datum, damit mehrere Sicherungen nebeneinander liegen können. */
-export function backupFilename(date = new Date()): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  const hh = String(date.getHours()).padStart(2, '0');
-  const mm = String(date.getMinutes()).padStart(2, '0');
-  return `cllctr-backup-${y}${m}${d}-${hh}${mm}.json`;
+export function backupFilename(): string {
+  return `cllctr-${today()}.json`;
 }
 
-/** Löst den Download der Backup-Datei aus. Nur im Browser aufrufen. */
-export async function downloadBackup(): Promise<{ filename: string; totalRows: number }> {
-  const backup = await buildBackup();
-  const json = JSON.stringify(backup, null, 2);
-  const blob = new Blob([json], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const filename = backupFilename();
+/** Löst den Download aus. Nur im Browser aufrufbar. */
+export function downloadJson(content: unknown, filename: string): void {
+  const blob = new Blob([JSON.stringify(content, null, 2)], {
+    type: 'application/json',
+  });
+  triggerDownload(blob, filename);
+}
 
+function triggerDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
-  // Erst nach dem Klick freigeben, sonst bricht der Download in Safari ab.
+  // Erst freigeben, wenn der Klick verarbeitet ist — sofort widerrufen bricht
+  // den Download in manchen Browsern ab.
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-
-  const totalRows = Object.values(backup.counts).reduce((a, b) => a + b, 0);
-  return { filename, totalRows };
 }
 
-export class BackupValidationError extends Error {}
+/* ------------------------------------------------------------------ */
+/* CSV                                                                 */
+/* ------------------------------------------------------------------ */
+
+function csvCell(value: unknown): string {
+  const s = value === null || value === undefined ? '' : String(value);
+  return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
 
 /**
- * Prüft eine eingelesene Datei, bevor irgendetwas geschrieben wird.
- * Lieber hier abbrechen als eine halb importierte Datenbank hinterlassen.
+ * Trainingseinheiten als CSV.
+ *
+ * Semikolon als Trenner und Komma als Dezimalzeichen: So öffnet die Datei in
+ * einem deutschen Excel ohne Importdialog. Ein Komma-getrenntes CSV landet dort
+ * komplett in Spalte A.
  */
-export function parseBackup(raw: string): BackupFile {
+export function sessionsToCsv(sessions: TrainingSession[]): string {
+  const head = [
+    'Datum',
+    'Sportart',
+    'Titel',
+    'Intensität',
+    'Zone',
+    'Status',
+    'Minuten geplant',
+    'Minuten tatsächlich',
+    'km geplant',
+    'km tatsächlich',
+    'RPE',
+    'Ø HF',
+    'Max HF',
+    'Belastung',
+    'Notiz',
+  ];
+
+  const rows = [...sessions]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((s) =>
+      [
+        s.date,
+        SPORT_LABEL[s.sport],
+        s.title,
+        s.intensity,
+        s.zone ?? '',
+        s.status,
+        s.plannedMinutes ?? '',
+        s.actualMinutes ?? '',
+        de(s.plannedDistanceKm),
+        de(s.actualDistanceKm),
+        s.rpe ?? '',
+        s.avgHr ?? '',
+        s.maxHr ?? '',
+        loadOf(s),
+        s.notes,
+      ].map(csvCell).join(';'),
+    );
+
+  return [head.join(';'), ...rows].join('\n');
+}
+
+function de(value: number | null): string {
+  return value === null ? '' : String(value).replace('.', ',');
+}
+
+export function downloadCsv(content: string, filename: string): void {
+  // BOM voran, sonst zeigt Excel Umlaute als Kauderwelsch.
+  triggerDownload(new Blob(['﻿', content], { type: 'text/csv;charset=utf-8' }), filename);
+}
+
+/* ------------------------------------------------------------------ */
+/* Import                                                              */
+/* ------------------------------------------------------------------ */
+
+export function parseBackup(text: string): BackupFile {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(text);
   } catch {
-    throw new BackupValidationError('Die Datei ist kein gültiges JSON.');
-  }
-
-  if (typeof parsed !== 'object' || parsed === null) {
-    throw new BackupValidationError('Die Datei enthält kein Objekt.');
+    throw new BackupError('Die Datei ist kein gültiges JSON.');
   }
 
   const candidate = parsed as Partial<BackupFile>;
-
-  if (candidate.format !== BACKUP_FORMAT) {
-    throw new BackupValidationError(
-      'Das ist keine Cllctr-Sicherung. Erwartet wird eine Datei, die mit "cllctr-backup" beginnt.',
-    );
+  if (candidate.format !== FORMAT) {
+    throw new BackupError('Das ist keine Cllctr-Sicherung.');
   }
-
   if (typeof candidate.schemaVersion !== 'number') {
-    throw new BackupValidationError('Der Sicherung fehlt die Versionsangabe.');
+    throw new BackupError('Der Sicherung fehlt die Versionsangabe.');
   }
-
   if (candidate.schemaVersion > SCHEMA_VERSION) {
-    throw new BackupValidationError(
-      `Die Sicherung stammt aus einer neueren Version (${candidate.schemaVersion}) als diese App (${SCHEMA_VERSION}). Bitte die App aktualisieren.`,
+    throw new BackupError(
+      `Die Sicherung stammt aus einer neueren Version (${candidate.schemaVersion}) als diese App (${SCHEMA_VERSION}).`,
     );
   }
-
   if (typeof candidate.data !== 'object' || candidate.data === null) {
-    throw new BackupValidationError('Der Sicherung fehlt der Datenteil.');
+    throw new BackupError('Der Sicherung fehlt der Datenteil.');
   }
 
   const data = candidate.data as Record<string, unknown>;
-  const unknownTables = Object.keys(data).filter(
-    (key) => !(TABLE_NAMES as readonly string[]).includes(key),
+  const unknown = Object.keys(data).filter(
+    (k) => !(TABLE_NAMES as readonly string[]).includes(k),
   );
-  if (unknownTables.length > 0) {
-    throw new BackupValidationError(
-      `Unbekannte Tabellen in der Sicherung: ${unknownTables.join(', ')}.`,
-    );
+  if (unknown.length > 0) {
+    throw new BackupError(`Unbekannte Tabellen in der Sicherung: ${unknown.join(', ')}.`);
   }
-
   for (const [key, rows] of Object.entries(data)) {
-    if (!Array.isArray(rows)) {
-      throw new BackupValidationError(`Tabelle "${key}" ist keine Liste.`);
-    }
+    if (!Array.isArray(rows)) throw new BackupError(`Tabelle "${key}" ist keine Liste.`);
   }
 
   return {
-    format: BACKUP_FORMAT,
+    format: FORMAT,
     schemaVersion: candidate.schemaVersion,
     exportedAt: typeof candidate.exportedAt === 'string' ? candidate.exportedAt : '',
     counts: (candidate.counts as Record<string, number>) ?? {},
@@ -139,53 +187,40 @@ export function parseBackup(raw: string): BackupFile {
   };
 }
 
-export type ImportMode =
-  /** Alles löschen, dann die Sicherung einspielen. Stellt den Stand exakt wieder her. */
-  | 'replace'
-  /** Vorhandenes behalten, Datensätze mit gleicher Id überschreiben. */
-  | 'merge';
+export type ImportMode = 'replace' | 'merge';
 
-export interface ImportResult {
-  mode: ImportMode;
-  written: Record<string, number>;
-  totalRows: number;
-}
-
-/** Spielt eine geprüfte Sicherung ein. Läuft komplett in einer Transaktion. */
-export async function applyBackup(backup: BackupFile, mode: ImportMode): Promise<ImportResult> {
+export async function applyBackup(
+  backup: BackupFile,
+  mode: ImportMode,
+): Promise<{ written: Record<string, number>; total: number }> {
   const written: Record<string, number> = {};
 
   await db.transaction('rw', db.tables, async () => {
     if (mode === 'replace') {
-      for (const name of TABLE_NAMES) {
-        await db.table(name).clear();
-      }
+      for (const name of TABLE_NAMES) await db.table(name).clear();
     }
-
     for (const name of TABLE_NAMES) {
       const rows = backup.data[name];
-      if (!rows || rows.length === 0) {
-        written[name] = 0;
-        continue;
-      }
-      await db.table(name as TableName).bulkPut(rows);
-      written[name] = rows.length;
+      written[name] = rows?.length ?? 0;
+      if (rows && rows.length > 0) await db.table(name as TableName).bulkPut(rows);
     }
   });
 
-  return {
-    mode,
-    written,
-    totalRows: Object.values(written).reduce((a, b) => a + b, 0),
-  };
+  return { written, total: Object.values(written).reduce((a, b) => a + b, 0) };
 }
 
-/** Liest eine vom Nutzer gewählte Datei ein. */
-export function readFileAsText(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ''));
-    reader.onerror = () => reject(new Error('Die Datei konnte nicht gelesen werden.'));
-    reader.readAsText(file);
-  });
+/** Wie viele Datensätze insgesamt gespeichert sind — für die Datenseite. */
+export async function countAll(): Promise<number> {
+  const counts = await Promise.all(TABLE_NAMES.map((n) => db.table(n).count()));
+  return counts.reduce((a, b) => a + b, 0);
+}
+
+/** Kennzahlen einer Einheit für Listen und Export. */
+export function sessionSummary(s: TrainingSession): string {
+  const parts: string[] = [];
+  const m = minutesOf(s);
+  const km = distanceOf(s);
+  if (m > 0) parts.push(`${m} min`);
+  if (km > 0) parts.push(`${String(km).replace('.', ',')} km`);
+  return parts.join(' · ');
 }

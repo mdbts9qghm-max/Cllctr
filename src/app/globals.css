@@ -1,57 +1,150 @@
 @import 'tailwindcss';
 
 /*
- * Cllctr — dunkel, reduziert, ernst.
- * Eine einzige Akzentfarbe (Bernstein), sonst nur Graustufen.
- * Die Metapher ist ein Artefakt-Inventar, kein Belohnungsheft.
+ * Design-Tokens.
+ *
+ * Eine Akzentfarbe (Signalblau) und drei Statusfarben (grün, gelb, rot). Der
+ * Akzent ist bewusst nicht grün: Grün bedeutet in dieser App "gut", und eine
+ * Akzentfarbe, die gleichzeitig eine Bewertung ist, macht jede Schaltfläche zu
+ * einer Aussage.
+ *
+ * Dark ist der Normalfall — die App wird um sechs Uhr früh und um elf Uhr
+ * nachts benutzt. Light existiert vollwertig daneben.
  */
+
 @theme {
-  --color-void: #0a0a0b;
-  --color-surface: #131316;
-  --color-surface-2: #1c1c21;
-  --color-line: #2a2a31;
-  --color-line-strong: #3d3d47;
+  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
 
-  --color-ink: #f4f4f5;
-  --color-ink-muted: #a1a1aa;
-  --color-ink-faint: #6b6b76;
+  --color-void: #08090c;
+  --color-surface: #101218;
+  --color-surface-2: #171a22;
+  --color-line: #23262f;
+  --color-line-strong: #333846;
 
-  --color-ember: #e0a43c;
-  --color-ember-dim: #8a6423;
+  --color-ink: #f2f4f8;
+  --color-ink-muted: #a8aebd;
+  --color-ink-faint: #6b7383;
 
-  --color-danger: #d4544a;
-  --color-ok: #4ea373;
+  --color-accent: #4d8dff;
+  --color-accent-dim: #2f5eb0;
+  --color-good: #22c55e;
+  --color-ok: #f5b544;
+  --color-warn: #ef4444;
 
-  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  --radius-card: 14px;
 }
 
-html {
+:root {
   color-scheme: dark;
-  -webkit-text-size-adjust: 100%;
+  --void: var(--color-void);
+  --surface: var(--color-surface);
+  --surface-2: var(--color-surface-2);
+  --line: var(--color-line);
+  --line-strong: var(--color-line-strong);
+  --ink: var(--color-ink);
+  --ink-muted: var(--color-ink-muted);
+  --ink-faint: var(--color-ink-faint);
 }
 
-body {
-  background-color: var(--color-void);
-  color: var(--color-ink);
-  font-family: var(--font-sans);
-  /* Safe-Area fuer den iPhone-Homescreen-Modus. */
-  padding-bottom: env(safe-area-inset-bottom);
-  overscroll-behavior-y: none;
+/*
+ * Light Mode. Nicht die dunklen Werte invertiert, sondern eigene: Ein
+ * umgedrehtes Dark-Theme wirkt im Hellen immer schmutzig.
+ */
+:root[data-theme='light'] {
+  color-scheme: light;
+  --void: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f0f2f5;
+  --line: #e2e5ea;
+  --line-strong: #cdd2da;
+  --ink: #12151c;
+  --ink-muted: #545b68;
+  --ink-faint: #858c99;
 }
 
-/* Zahlen sollen in Tabellen und Zaehlern nicht springen. */
-.tabular {
-  font-variant-numeric: tabular-nums;
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    color-scheme: light;
+    --void: #f6f7f9;
+    --surface: #ffffff;
+    --surface-2: #f0f2f5;
+    --line: #e2e5ea;
+    --line-strong: #cdd2da;
+    --ink: #12151c;
+    --ink-muted: #545b68;
+    --ink-faint: #858c99;
+  }
 }
 
-::selection {
-  background: var(--color-ember-dim);
-  color: var(--color-ink);
+@layer base {
+  html {
+    background: var(--void);
+    /* Safari zoomt beim Fokus in ein Feld, wenn die Schrift unter 16px liegt. */
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background: var(--void);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    /* Kein Gummiband-Scrollen über den Rand hinaus — auf dem Homescreen
+       fühlt sich das sonst nach Webseite an statt nach App. */
+    overscroll-behavior-y: none;
+  }
+
+  /* Zahlen müssen untereinander stehen, sonst zappelt jede Live-Anzeige. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+
+  input[type='number'] {
+    -moz-appearance: textfield;
+  }
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  /* Tastaturfokus sichtbar, Mausfokus nicht — sonst leuchtet nach jedem
+     Antippen auf dem Telefon ein Rahmen nach. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--color-accent);
+    color: #fff;
+  }
 }
 
-/* Sichtbarer Fokus, auch mit dunklem Hintergrund. */
-:focus-visible {
-  outline: 2px solid var(--color-ember);
-  outline-offset: 2px;
+@utility bg-void { background-color: var(--void); }
+@utility bg-surface { background-color: var(--surface); }
+@utility bg-surface-2 { background-color: var(--surface-2); }
+@utility border-line { border-color: var(--line); }
+@utility border-line-strong { border-color: var(--line-strong); }
+@utility text-ink { color: var(--ink); }
+@utility text-ink-muted { color: var(--ink-muted); }
+@utility text-ink-faint { color: var(--ink-faint); }
+
+/* Wer die Bewegung abbestellt hat, bekommt keine. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
