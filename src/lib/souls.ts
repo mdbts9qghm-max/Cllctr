@@ -14,9 +14,10 @@
  *      sie regelkonform umgeplant wurde. Wer ein Leben hat, verliert hier nichts.
  */
 
-import { addDays, daysBetween, startOfWeek } from './dates';
+import { daysBetween, startOfWeek } from './dates';
 import { PROGRESSING_TYPES, progresses } from './progression';
 import { shiftAllowance } from './rules';
+import { checkInStreak } from './readiness';
 import { hasMeasurement, recoveryFor } from './recovery';
 import { resolveShiftDay, type ShiftContext } from './shifts';
 import { isDaily, routineDays, routineFamily } from './tasks';
@@ -183,18 +184,7 @@ function doneByWeek(ctx: SoulContext): Map<IsoDate, Session[]> {
   return out;
 }
 
-/** Zählt Tage in Folge, an denen etwas eingetragen wurde — bis heute zurück. */
-function entryStreak(dates: Set<IsoDate>, today: IsoDate): { length: number; start: IsoDate } {
-  // Heute darf noch fehlen: Wer abends einträgt, hätte sonst tagsüber eine
-  // gerissene Serie, obwohl nichts passiert ist.
-  let cursor = dates.has(today) ? today : addDays(today, -1);
-  let length = 0;
-  while (dates.has(cursor)) {
-    length++;
-    cursor = addDays(cursor, -1);
-  }
-  return { length, start: addDays(cursor, 1) };
-}
+
 
 function totalMinutes(ctx: SoulContext): number {
   return completedLogs(ctx).reduce((sum, x) => sum + (x.log.durationMin ?? 0), 0);
@@ -597,21 +587,42 @@ export const SOUL_CATALOG: SoulDefinition[] = [
 
   {
     key: 'recovery_week',
-    name: 'Sieben Tage gemessen',
+    name: 'Sieben Morgen',
     description:
-      'Eine Woche am Stück Werte eingetragen. Ohne Zahlen plant die App ins Blaue — mit ihnen plant sie deinen Körper.',
+      'Eine Woche am Stück eingecheckt. Ohne den Morgen plant die App ins Blaue — mit ihm plant sie deinen Körper.',
     rarity: 'common',
     sourceKind: 'streak',
     earned: (ctx) => {
-      const dates = new Set(ctx.readiness.filter(hasMeasurement).map((r) => r.date));
-      const streak = entryStreak(dates, ctx.today);
-      if (streak.length < 7) return [];
-      return [{ sourceId: null, detail: `${streak.length} Tage in Folge`, date: ctx.today }];
+      const streak = checkInStreak(ctx.readiness, ctx.today);
+      if (streak < 7) return [];
+      return [{ sourceId: null, detail: `${streak} Tage in Folge`, date: ctx.today }];
     },
     progress: (ctx) => {
-      const dates = new Set(ctx.readiness.filter(hasMeasurement).map((r) => r.date));
-      const streak = entryStreak(dates, ctx.today);
-      return streak.length >= 7 ? null : { current: streak.length, target: 7, unit: 'Tage' };
+      const streak = checkInStreak(ctx.readiness, ctx.today);
+      return streak >= 7 ? null : { current: streak, target: 7, unit: 'Tage' };
+    },
+  },
+
+  {
+    key: 'closed_days',
+    name: 'Vierzehn ganze Tage',
+    description:
+      'Vierzehnmal morgens eingecheckt und abends ausgecheckt. Ein Tag, der vorne und hinten einen Haken hat, ist kein Tag, der einfach passiert ist.',
+    rarity: 'rare',
+    sourceKind: 'streak',
+    earned: (ctx) => {
+      const full = ctx.readiness
+        .filter((r) => r.checkedInAt && r.checkedOutAt && r.date <= ctx.today)
+        .map((r) => r.date)
+        .sort();
+      if (full.length < 14) return [];
+      return [{ sourceId: null, detail: `${full.length} Tage`, date: full[13] }];
+    },
+    progress: (ctx) => {
+      const current = ctx.readiness.filter(
+        (r) => r.checkedInAt && r.checkedOutAt && r.date <= ctx.today,
+      ).length;
+      return current >= 14 ? null : { current, target: 14, unit: 'Tage' };
     },
   },
 

@@ -72,8 +72,8 @@ export interface PlanInput {
   readiness?: Map<IsoDate, DayReadiness>;
   /** Der heutige Tag. Trennt "noch planbar" von "war so". Nur für Tests gesetzt. */
   todayIso?: IsoDate;
-  /** Montag, ab dem der Blockrhythmus zählt. Ohne Angabe der feste Bezugspunkt. */
-  blockAnchor?: IsoDate;
+  /** Tag 1 des Plans. Ohne Angabe der feste Bezugspunkt. */
+  planStart?: IsoDate;
   /** Letzter Tag, für den überhaupt geplant wird. */
   until?: IsoDate;
   /**
@@ -159,7 +159,7 @@ export function planFingerprint(
     settings.weeklyVolumeGrowthPct,
     settings.mesoLoadCycles,
     settings.mesoDeloadCycles,
-    settings.blockAnchorDate ?? '-',
+    settings.planStartDate ?? '-',
   ].join('|');
 
   // Das Datum gehört dazu. Ein Plan ist eine Aussage über **ab heute** — wird
@@ -310,7 +310,7 @@ export function generateTrainingPlan(input: PlanInput): GeneratedPlan {
   const todayIso = input.todayIso ?? today();
 
   const lastDay = input.until ?? addDays(startDate, Math.max(1, input.weeks) * 7 - 1);
-  const anchor = input.blockAnchor ?? settings.blockAnchorDate ?? ROTATION_EPOCH;
+  const anchor = input.planStart ?? settings.planStartDate ?? ROTATION_EPOCH;
   const spans = lastDay >= startDate ? weekSpans(startDate, lastDay, settings, anchor) : [];
 
   // Die Erholung wird für den ganzen Zeitraum auf einmal geschätzt: Die

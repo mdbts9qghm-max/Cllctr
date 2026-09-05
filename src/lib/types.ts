@@ -12,7 +12,7 @@ export type IsoDate = string;
 export type IsoDateTime = string;
 
 /** Version des Schemas im Export. Wird bei jeder Änderung am Modell hochgezählt. */
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 
 /* ------------------------------------------------------------------ */
 /* Schicht                                                             */
@@ -180,6 +180,18 @@ export interface DayReadiness {
   hrvMs: number | null;
   /** Ruhepuls. */
   restingHr: number | null;
+  /**
+   * Wann der Check-in erledigt wurde, null solange er offen ist.
+   *
+   * Getrennt von "es steht eine Zahl drin": Ein Tag ohne Recovery-Wert kann
+   * trotzdem abgeschlossen sein — nicht jeden Morgen liegt die Uhr bereit. Der
+   * Zeitstempel sagt "ich habe hingeschaut", die Werte sagen, was dabei
+   * herauskam. Ohne diese Trennung hinge der offene Check-in ewig am Bildschirm.
+   */
+  checkedInAt: IsoDateTime | null;
+  /** Wann der Check-out erledigt wurde. */
+  checkedOutAt: IsoDateTime | null;
+  /** Freitext aus dem Check-out: wie der Tag war. */
   note: string;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
@@ -1024,15 +1036,17 @@ export interface Settings {
    */
   allowDoubleDayPerCycle: boolean;
   /**
-   * Ab welchem Montag der Blockrhythmus gezählt wird.
+   * Tag 1 des Plans — ab wann gezählt wird.
    *
-   * Wird beim ersten Plan gesetzt und danach nie wieder angefasst. Der Grund
-   * ist die tägliche Anpassung: Zählte der Plan seine eigenen Wochen, wanderte
-   * die Deload-Woche mit jeder Neuplanung um einen Tag weiter und käme nie an.
-   * Mit festem Anker liegt sie im Kalender fest — und Block 1 beginnt trotzdem
-   * an dem Tag, an dem du angefangen hast.
+   * Zwei Dinge hängen daran: die Nummerierung ("Tag 34, Woche 5") und der
+   * Blockrhythmus, also wo die Deload-Wochen liegen. Beides muss fest im
+   * Kalender stehen, weil der Plan sich täglich neu rechnet: Zählte er seine
+   * eigenen Wochen, rückte die Deload-Woche jeden Tag weiter und käme nie an.
+   *
+   * Wird beim ersten Plan auf den Starttag gesetzt und lässt sich unter Setup
+   * ändern — etwa, wenn der Aufbau erst nächsten Montag richtig losgeht.
    */
-  blockAnchorDate: IsoDate | null;
+  planStartDate: IsoDate | null;
   /** Zyklen pro Mesozyklus: Belastung und anschließender Deload. */
   mesoLoadCycles: number;
   mesoDeloadCycles: number;

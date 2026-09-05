@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
-import { formatShort, monthKey, today } from '@/lib/dates';
+import { daysBetween, formatShort, monthKey, today } from '@/lib/dates';
 import { useSettings, useShiftContext } from '@/lib/hooks';
 import { capacityAllows, resolveShiftDay } from '@/lib/shifts';
 import {
@@ -26,6 +26,7 @@ import { SESSION_STATUS_LABEL, SESSION_TYPES, type Session, type Soul } from '@/
 import { MonthGrid } from '@/components/MonthGrid';
 import { ShiftPicker } from '@/components/ShiftPicker';
 import { ReadinessCard } from '@/components/ReadinessCard';
+import { DayCheck } from '@/components/DayCheck';
 import { Button, Card, Mark, Notice, Section } from '@/components/ui';
 import { NewRecordsNotice, SessionLogForm } from '@/components/SessionLogForm';
 
@@ -143,6 +144,11 @@ export default function PlanPage() {
   }
 
   const todayIso = today();
+  /** Der wievielte Tag des Plans heute ist — null, solange Tag 1 nicht erreicht ist. */
+  const dayNumber =
+    settings.planStartDate && settings.planStartDate <= todayIso
+      ? daysBetween(settings.planStartDate, todayIso) + 1
+      : null;
   const activeMicroIndex = plan.micros.findIndex(
     (m) => m.startDate <= todayIso && m.endDate >= todayIso,
   );
@@ -223,8 +229,19 @@ export default function PlanPage() {
           </p>
         </div>
 
+        {/* Heute ist der Tag, an dem eingecheckt wird — für jeden anderen Tag
+            gibt es nur die Werte. Ein Check-in für übermorgen wäre eine
+            Behauptung über einen Morgen, den es noch nicht gab. */}
         <div className="mb-3">
-          <ReadinessCard day={day} />
+          {date === todayIso ? (
+            <DayCheck
+              day={day}
+              shiftTypes={ctx!.shiftTypes}
+              openSessions={own.filter((x) => x.status === 'planned').length}
+            />
+          ) : (
+            <ReadinessCard day={day} />
+          )}
         </div>
 
         <div className="space-y-3">
@@ -449,22 +466,23 @@ export default function PlanPage() {
       {activeMicro ? (
         <Section title="Stand im Block">
           <Card>
-            <p className="text-sm text-ink">
-              Woche {activeMicro.index} von {cyclesPerMeso}
-              {activeMicro.isDeload ? ' — Deload läuft' : ''}
-            </p>
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="text-sm text-ink">
+                Woche {activeMicro.index} von {cyclesPerMeso}
+                {activeMicro.isDeload ? ' — Deload läuft' : ''}
+              </p>
+              {dayNumber !== null ? (
+                <p className="shrink-0 text-xs text-ink-faint tabular">
+                  Tag {dayNumber} des Plans
+                </p>
+              ) : null}
+            </div>
             <p className="mt-1 text-xs leading-relaxed text-ink-faint">
               {activeMicro.lengthDays} Tage, geplante Last {activeMicro.plannedLoad}.{' '}
               {activeMicro.isDeload
                 ? 'Danach beginnt der nächste Block.'
                 : `Deload in ${Math.max(0, cyclesToDeload)} ${
-                    ctx.pattern
-                      ? cyclesToDeload === 1
-                        ? 'Woche'
-                        : 'Wochen'
-                      : cyclesToDeload === 1
-                        ? 'Woche'
-                        : 'Wochen'
+                    cyclesToDeload === 1 ? 'Woche' : 'Wochen'
                   }.`}
             </p>
           </Card>

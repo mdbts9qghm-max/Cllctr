@@ -167,6 +167,32 @@ export default function SetupPage() {
       </Section>
 
       <Section
+        title="Tag 1 des Plans"
+        hint="Ab wann gezählt wird. Daran hängen die Nummerierung (Tag 34, Woche 5) und die Lage der Deload-Wochen."
+      >
+        <Card>
+          <Field label="Startdatum">
+            <input
+              type="date"
+              value={settings.planStartDate ?? ''}
+              onChange={(e) =>
+                void db.settings.update('singleton', {
+                  planStartDate: e.target.value || null,
+                  updatedAt: now(),
+                })
+              }
+              className={`${inputClass} tabular`}
+            />
+          </Field>
+          <p className="mt-3 text-xs leading-relaxed text-ink-faint">
+            {settings.planStartDate
+              ? 'Verschiebst du das Datum, wandern die Deload-Wochen mit. Der Plan rechnet sich beim nächsten Öffnen von selbst neu; Erledigtes und Fixiertes bleibt.'
+              : 'Noch nicht gesetzt — beim ersten Plan wird der Starttag eingetragen.'}
+          </p>
+        </Card>
+      </Section>
+
+      <Section
         title="Wochenziele"
         hint="Anzahl Einheiten pro Woche — bewusst keine Wochentage. Wohin sie fallen, entscheiden Schicht und Erholung."
       >

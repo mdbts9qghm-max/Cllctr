@@ -121,15 +121,14 @@ export async function createAndSavePlan(input: PlanInput): Promise<GeneratedPlan
       // Löschen, also muss er nicht vorher gerettet werden.
       const progressionBase = input.progressionBase ?? (await currentProgressionLevels());
 
-      // Der Blockanker wird beim allerersten Plan gesetzt und danach nie wieder
-      // angefasst: Block 1 beginnt in der Woche, in der man angefangen hat, und
-      // die Deload-Woche liegt ab da fest — auch wenn der Plan sich täglich neu
-      // rechnet.
+      // Tag 1 wird beim allerersten Plan gesetzt und danach nur noch von Hand
+      // geändert: Die Nummerierung und die Lage der Deload-Wochen hängen daran,
+      // und beides muss fest stehen, obwohl der Plan sich täglich neu rechnet.
       const stored = await db.settings.get('singleton');
-      let blockAnchor = input.blockAnchor ?? stored?.blockAnchorDate ?? null;
-      if (!blockAnchor) {
-        blockAnchor = startOfWeek(input.startDate);
-        await db.settings.update('singleton', { blockAnchorDate: blockAnchor, updatedAt: now() });
+      let planStart = input.planStart ?? stored?.planStartDate ?? null;
+      if (!planStart) {
+        planStart = input.startDate;
+        await db.settings.update('singleton', { planStartDate: planStart, updatedAt: now() });
       }
 
       // Protokollierte Einheiten überleben das Löschen. Der neue Plan muss sie
@@ -170,7 +169,7 @@ export async function createAndSavePlan(input: PlanInput): Promise<GeneratedPlan
         history: input.history ?? history,
         readiness,
         until,
-        blockAnchor,
+        planStart,
       });
 
       await clearPlanFrom(input.startDate);

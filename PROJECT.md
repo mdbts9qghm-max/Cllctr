@@ -2060,6 +2060,93 @@ stehen.
 
 ---
 
+## Check-in und Check-out
+
+Der Tag hat jetzt einen Anfang und ein Ende.
+
+### Warum
+
+Die Eingaben lagen verstreut: Werte in einer Karte, die Schicht auf einem anderen Screen, das
+Protokoll an der Einheit, der Strain irgendwo dazwischen. Das ergab keine Reihenfolge — und
+was keine Reihenfolge hat, macht man unregelmäßig. Die App braucht aber genau diese Eingaben
+täglich, sonst plant sie ins Blaue.
+
+Zwei feste Punkte, sauber getrennt nach dem, wofür sie da sind:
+
+| | wann | was | wofür |
+|---|---|---|---|
+| **Check-in** | morgens | Recovery, Schlaf, Sleep Debt, optional HRV und Ruhepuls — dazu die Schicht des Tages | Alles, was der Plan zum Planen braucht |
+| **Check-out** | ab 17:00 | Day Strain, Notiz zum Tag | Verlauf — was aus dem Tag geworden ist |
+
+Die Trennung ist keine Kosmetik: Der Check-in **steuert** den Tag, der Check-out **beschreibt**
+ihn. Der Strain fließt deshalb bewusst nicht in die Planung ein — heute ist gelaufen, wenn er
+feststeht.
+
+### Abhaken geht ohne Werte
+
+`checkedInAt` und `checkedOutAt` sind Zeitstempel, keine abgeleitete Größe aus "steht eine Zahl
+drin". Ein Morgen ohne Uhr am Handgelenk ist trotzdem ein erledigter Check-in. Hinge der Haken
+an den Werten, stünde er an solchen Tagen für immer offen — und offene Punkte, die man nicht
+schließen kann, hört man nach einer Woche auf zu lesen.
+
+Umgekehrt gilt dasselbe: Ein Eintrag ohne Werte **und** ohne Haken wird gelöscht. Zwei
+Zustände für dieselbe Sache laufen früher oder später auseinander.
+
+### Die Karte
+
+`DayCheck` ersetzt auf dem Heute-Screen die reine Werte-Karte. Zwei Reiter mit Punkt: offen
+(Akzent), erledigt (grün), noch zu früh (grau). Aufgeklappt wird automatisch, was dran ist —
+morgens der Check-in, ab 17:00 der Check-out. Ist beides erledigt, bleibt die
+Erholungsschätzung als Zusammenfassung stehen, denn sie ist der Grund, warum der Tag so
+geplant ist.
+
+17:00 als Grenze ist bewusst früh: Wer um 19:00 in die Nachtschicht geht, kommt bis zum
+nächsten Morgen sonst nicht mehr dazu.
+
+Steht abends noch eine Einheit offen, sagt der Check-out das — hakt sie aber nicht selbst ab.
+Das gehört an die Einheit, mit Protokoll. Er soll nur nicht so tun, als wäre der Tag fertig.
+
+Im **Tagesdetail des Plans** erscheint `DayCheck` nur für heute; jeder andere Tag bekommt die
+schlichte Werte-Karte (`ReadinessCard`). Ein Check-in für übermorgen wäre eine Behauptung über
+einen Morgen, den es noch nicht gab.
+
+### Tag 1 lässt sich setzen
+
+`Settings.planStartDate` — unter Setup als Datumsfeld. Daran hängen zwei Dinge:
+
+- die **Nummerierung**: „Tag 34 · Woche 5" im Kopf des Heute-Screens und unter *Stand im Block*,
+- die **Lage der Deload-Wochen** (vorher `blockAnchorDate`).
+
+Beim ersten Plan wird der Starttag eingetragen; danach ändert es nur noch, wer es ändert.
+Das Datum steht im Fingerabdruck, also rechnet sich der Plan nach einer Verschiebung von selbst
+neu — Erledigtes und Fixiertes bleibt.
+
+### Seelen
+
+- **„Sieben Tage gemessen"** heißt jetzt **„Sieben Morgen"** und zählt Check-ins statt
+  Messwerte. Was zählt, ist das Hinschauen, nicht ob die Uhr geladen war.
+- Neu: **„Vierzehn ganze Tage"** — vierzehnmal morgens eingecheckt *und* abends ausgecheckt.
+  Ein Tag mit Haken an beiden Enden ist kein Tag, der einfach passiert ist.
+
+Katalog: 24 Seelen.
+
+### Geprüft
+
+Im Browser mit gestellter Uhr durchgespielt: 10. September, 07:30 — Check-in offen, Check-out
+grau mit „ab 17:00". Recovery 81 % eingetragen, Check-in abgeschlossen: Karte klappt zu, die
+Schätzung bleibt sichtbar, der Plan legt Intervalle auf den Tag. Uhr auf 20:00 — der Check-out
+klappt auf, meldet die noch offene Einheit, nimmt Strain und Notiz. Nach dem Abschließen sind
+beide Reiter grün. Uhr auf den 11. September, 07:30 — Check-in wieder offen, Kopfzeile „Tag 2 ·
+Woche 1", Plan an zwei Tagen angepasst. Dazu Tag 1 im Setup von 07.09. auf 01.09. verschoben:
+Die Kopfzeile springt auf „Tag 7".
+
+### Schema 13
+
+`DayReadiness.checkedInAt` / `.checkedOutAt`, `Settings.planStartDate` (vorher
+`blockAnchorDate`).
+
+---
+
 ## Entwicklung
 
 ```

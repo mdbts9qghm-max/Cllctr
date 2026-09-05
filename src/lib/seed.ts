@@ -227,7 +227,8 @@ export function defaultSettings(): Settings {
     allowStrengthOnLightDays: false,
     allowDoubleDayPerCycle: true,
     // Leer: Der Anker wird beim ersten Plan auf die dann laufende Woche gesetzt.
-    blockAnchorDate: null,
+    // Leer: wird beim ersten Plan auf den Starttag gesetzt.
+    planStartDate: null,
     mesoLoadCycles: 4,
     mesoDeloadCycles: 1,
     // Leer: keine Korrektur, der erste Plan fängt bei null an.

@@ -1,7 +1,7 @@
 /**
- * Die Messwerte eines Tages.
+ * Der Tageseintrag: Messwerte und die beiden Haken.
  *
- * Hier stehen nur Zahlen. Was sie bedeuten — hohe, mittlere oder niedrige
+ * Hier stehen nur Zahlen und Zeitstempel. Was sie bedeuten — hohe, mittlere oder niedrige
  * Erholung —, rechnet `recovery.ts` aus. Die Trennung ist der Punkt: Eine
  * eingetragene Stufe neben den Zahlen wäre eine zweite Wahrheit, und bei jedem
  * Widerspruch wüsste niemand, welche gilt.
@@ -12,6 +12,7 @@
  */
 
 import { db } from './db';
+import { addDays } from './dates';
 import { now } from './ids';
 import {
   MEASUREMENT_KEYS,
@@ -31,6 +32,8 @@ export function emptyReadiness(date: IsoDate): DayReadiness {
     strain: null,
     hrvMs: null,
     restingHr: null,
+    checkedInAt: null,
+    checkedOutAt: null,
     note: '',
     createdAt: ts,
     updatedAt: ts,
@@ -71,7 +74,11 @@ export async function setMeasurement(
     const existing = await db.readiness.get(date);
     const ts = now();
     const next: DayReadiness = {
-      ...(existing ?? emptyReadiness(date)),
+      // Der leere Tag zuerst: Einträge aus einer älteren Version kennen die
+      // Haken noch nicht, und undefined weiterzureichen hieße, sie später
+      // überall abfangen zu müssen.
+      ...emptyReadiness(date),
+      ...existing,
       [key]: value,
       date,
       createdAt: existing?.createdAt ?? ts,
@@ -86,9 +93,110 @@ export async function setMeasurement(
   });
 }
 
-/** Entfernt alle Werte eines Tages. */
+/** Entfernt alle Werte eines Tages, samt beider Haken. */
 export async function clearReadiness(date: IsoDate): Promise<void> {
   await db.readiness.delete(date);
+}
+
+/* ------------------------------------------------------------------ */
+/* Check-in und Check-out                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Setzt oder löst den Haken eines der beiden Tagespunkte.
+ *
+ * Der Haken ist bewusst getrennt von den Werten: Ein Morgen ohne Uhr am
+ * Handgelenk ist trotzdem ein erledigter Check-in. Hinge er an "es steht eine
+ * Zahl drin", stünde er an solchen Tagen für immer offen — und offene Punkte,
+ * die man nicht schließen kann, hört man nach einer Woche auf zu lesen.
+ */
+export async function setCheck(
+  date: IsoDate,
+  which: 'in' | 'out',
+  done: boolean,
+): Promise<void> {
+  await db.transaction('rw', db.readiness, async () => {
+    const existing = await db.readiness.get(date);
+    const ts = now();
+    const next: DayReadiness = {
+      ...emptyReadiness(date),
+      ...existing,
+      [which === 'in' ? 'checkedInAt' : 'checkedOutAt']: done ? ts : null,
+      date,
+      createdAt: existing?.createdAt ?? ts,
+      updatedAt: ts,
+    };
+
+    // Ein Eintrag ohne Werte und ohne Haken ist kein Eintrag.
+    if (
+      MEASUREMENT_KEYS.every((k) => next[k] === null) &&
+      next.checkedInAt === null &&
+      next.checkedOutAt === null &&
+      next.note === ''
+    ) {
+      await db.readiness.delete(date);
+      return;
+    }
+    await db.readiness.put(next);
+  });
+}
+
+/** Schreibt die Notiz aus dem Check-out. */
+export async function setDayNote(date: IsoDate, note: string): Promise<void> {
+  await db.transaction('rw', db.readiness, async () => {
+    const existing = await db.readiness.get(date);
+    const ts = now();
+    await db.readiness.put({
+      ...emptyReadiness(date),
+      ...existing,
+      note,
+      date,
+      createdAt: existing?.createdAt ?? ts,
+      updatedAt: ts,
+    });
+  });
+}
+
+/**
+ * Ab wann der Check-out ansteht.
+ *
+ * Vorher wäre er verfrüht — der Tag ist noch nicht gelaufen, der Strain steht
+ * noch nicht fest. Bewusst früh genug für eine Nachtschicht, die um 19:00
+ * beginnt: Wer danach eincheckt, kommt bis zum nächsten Morgen nicht mehr dazu.
+ */
+export const CHECKOUT_FROM_HOUR = 17;
+
+export type CheckState = 'open' | 'done' | 'early';
+
+export interface DayChecks {
+  checkIn: CheckState;
+  checkOut: CheckState;
+}
+
+/** Was an diesem Tag noch offen ist. `hour` ist die aktuelle Stunde 0–23. */
+export function dayChecks(row: DayReadiness | undefined, hour: number): DayChecks {
+  return {
+    checkIn: row?.checkedInAt ? 'done' : 'open',
+    checkOut: row?.checkedOutAt
+      ? 'done'
+      : hour >= CHECKOUT_FROM_HOUR
+        ? 'open'
+        : 'early',
+  };
+}
+
+/** Tage in Folge mit erledigtem Check-in, bis zu einem Stichtag zurück. */
+export function checkInStreak(rows: DayReadiness[], todayIso: IsoDate): number {
+  const done = new Set(rows.filter((r) => r.checkedInAt).map((r) => r.date));
+  // Heute darf noch fehlen: Wer erst mittags eincheckt, hätte sonst vormittags
+  // eine gerissene Serie, obwohl nichts passiert ist.
+  let cursor = done.has(todayIso) ? todayIso : addDays(todayIso, -1);
+  let length = 0;
+  while (done.has(cursor)) {
+    length++;
+    cursor = addDays(cursor, -1);
+  }
+  return length;
 }
 
 /**

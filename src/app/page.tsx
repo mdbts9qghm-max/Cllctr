@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
-import { addDays, formatShort, today, weekdayShort } from '@/lib/dates';
+import { addDays, daysBetween, formatShort, today, weekdayShort } from '@/lib/dates';
 import { useSettings, useShiftContext } from '@/lib/hooks';
 import { capacityAllows, resolveShiftDay, resolveShiftRange } from '@/lib/shifts';
 import { blockStatus, explainRestDay, explainSession } from '@/lib/explain';
@@ -29,7 +29,7 @@ import { CAPACITY_LABEL, TASK_ENERGY_LABEL, type Session, type Task , type Soul 
 import { Button, CapacityBadge, Card, Mark, Notice, Section } from '@/components/ui';
 import { NewRecordsNotice, SessionLogForm } from '@/components/SessionLogForm';
 import { SessionCard } from '@/components/SessionCard';
-import { ReadinessCard } from '@/components/ReadinessCard';
+import { DayCheck } from '@/components/DayCheck';
 
 /** Tage in der Vorschau "Als Nächstes". */
 const LOOKAHEAD_DAYS = 4;
@@ -144,6 +144,15 @@ export default function HeutePage() {
 
   // Die Erholung zählt auch für den Haushalt: Sonst stünde an einem Tag mit
   // 24 % Recovery weiter der Großputz auf der Liste.
+  /**
+   * Der wievielte Tag des Plans heute ist. Null, solange kein Tag 1 gesetzt ist
+   * oder er noch in der Zukunft liegt — dann wäre "Tag −3" nur verwirrend.
+   */
+  const dayNumber =
+    settings.planStartDate && settings.planStartDate <= todayIso
+      ? daysBetween(settings.planStartDate, todayIso) + 1
+      : null;
+
   const budget = taskEnergyBudget(
     day,
     todaySessions,
@@ -179,6 +188,11 @@ export default function HeutePage() {
             <span className="block truncate text-sm text-ink">
               {formatShort(todayIso)} · {day.shiftType.name}
             </span>
+            {dayNumber !== null ? (
+              <span className="block truncate text-[11px] text-ink-muted tabular">
+                Tag {dayNumber} · Woche {Math.ceil(dayNumber / 7)}
+              </span>
+            ) : null}
             <span className="block truncate text-[11px] text-ink-faint tabular">
               {/* An freien Tagen sagt das Zeitfenster dasselbe wie die Zeitangabe —
                   dann bleibt es weg. */}
@@ -192,11 +206,15 @@ export default function HeutePage() {
           <CapacityBadge capacity={day.capacity} label={CAPACITY_LABEL[day.capacity]} />
         </Link>
 
-        {/* Nur die Werte — die Eingabe, von der alles Weitere abhängt, und die
-            sonst nie gemacht würde. Was daraus folgt, steht an der Einheit
-            darunter, nicht in einem eigenen Kasten darüber. */}
+        {/* Der Rahmen des Tages: morgens eintragen, was der Plan braucht,
+            abends, was daraus geworden ist. Steht oben, weil der Check-in die
+            Eingabe ist, von der alles Weitere abhängt. */}
         <div className="mb-4">
-          <ReadinessCard day={day} />
+          <DayCheck
+            day={day}
+            shiftTypes={ctx.shiftTypes}
+            openSessions={todaySessions.filter((x) => x.status === 'planned').length}
+          />
         </div>
 
         {message ? (
